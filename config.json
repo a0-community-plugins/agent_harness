@@ -1,0 +1,1 @@
+{"protected_paths": ["agent.py", "initialize.py", "usr/plugins/"], "ambient_assist_enabled": true, "memory_curation_enabled": true, "show_status_ui": true, "default_deep_mode": "pro", "mode_policies": {"standard": {"repair_limit": 2, "subagent_limit": 4}, "pro": {"repair_limit": 4, "subagent_limit": 6}, "ultra": {"subagent_limit": 6, "repair_limit": 8}}}

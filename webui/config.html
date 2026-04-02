@@ -1,0 +1,198 @@
+<html>
+<head>
+  <title>Agent Harness Settings</title>
+</head>
+<body>
+  <div
+    x-data="{
+      standardSubagentLimit: config?.mode_policies?.standard?.subagent_limit ?? 0,
+      standardRepairLimit: config?.mode_policies?.standard?.repair_limit ?? 1,
+      proSubagentLimit: config?.mode_policies?.pro?.subagent_limit ?? 0,
+      proRepairLimit: config?.mode_policies?.pro?.repair_limit ?? 1,
+      ultraSubagentLimit: config?.mode_policies?.ultra?.subagent_limit ?? 3,
+      ultraRepairLimit: config?.mode_policies?.ultra?.repair_limit ?? 3,
+      protectedPathsText: Array.isArray(config?.protected_paths) ? config.protected_paths.join('\n') : 'agent.py\ninitialize.py',
+    }"
+    x-init="(() => {
+      config.ambient_assist_enabled = config.ambient_assist_enabled ?? true;
+      config.memory_curation_enabled = config.memory_curation_enabled ?? true;
+      config.show_status_ui = config.show_status_ui ?? true;
+      config.default_deep_mode = config.default_deep_mode || 'pro';
+
+      const ensureMode = (mode) => { config.mode_policies = config.mode_policies || {}; config.mode_policies[mode] = config.mode_policies[mode] || {}; };
+
+      $watch('standardSubagentLimit', v => { ensureMode('standard'); config.mode_policies.standard.subagent_limit = v; });
+      $watch('standardRepairLimit', v => { ensureMode('standard'); config.mode_policies.standard.repair_limit = v; });
+      $watch('proSubagentLimit', v => { ensureMode('pro'); config.mode_policies.pro.subagent_limit = v; });
+      $watch('proRepairLimit', v => { ensureMode('pro'); config.mode_policies.pro.repair_limit = v; });
+      $watch('ultraSubagentLimit', v => { ensureMode('ultra'); config.mode_policies.ultra.subagent_limit = v; });
+      $watch('ultraRepairLimit', v => { ensureMode('ultra'); config.mode_policies.ultra.repair_limit = v; });
+      $watch('protectedPathsText', v => { config.protected_paths = v.split('\n').map(s => s.trim()).filter(Boolean); });
+    })()"
+  >
+    <template x-if="config">
+      <div class="agent-harness-config">
+        <div class="field">
+          <div class="field-label">
+            <div class="field-title">Ambient Assist</div>
+            <div class="field-description">Keep lightweight coding guidance active when the plugin is enabled.</div>
+          </div>
+          <div class="field-control">
+            <label class="toggle">
+              <input type="checkbox" x-model="config.ambient_assist_enabled" />
+              <span class="toggler"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">
+            <div class="field-title">Default Deep Mode</div>
+            <div class="field-description">Mode launched first when starting a deep harness workflow.</div>
+          </div>
+          <div class="field-control">
+            <select x-model="config.default_deep_mode">
+              <option value="flash">Flash</option>
+              <option value="standard">Standard</option>
+              <option value="pro">Pro</option>
+              <option value="ultra">Ultra</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">
+            <div class="field-title">Curated Memory</div>
+            <div class="field-description">Keep rule proposals reviewable instead of persisting them automatically.</div>
+          </div>
+          <div class="field-control">
+            <label class="toggle">
+              <input type="checkbox" x-model="config.memory_curation_enabled" />
+              <span class="toggler"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">
+            <div class="field-title">Show Status UI</div>
+            <div class="field-description">Display the harness status strip above the chat input.</div>
+          </div>
+          <div class="field-control">
+            <label class="toggle">
+              <input type="checkbox" x-model="config.show_status_ui" />
+              <span class="toggler"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">
+            <div class="field-title">Standard Subagent Limit</div>
+            <div class="field-description">Maximum concurrent subagents in Standard mode.</div>
+          </div>
+          <div class="field-control">
+            <input type="number" min="0" x-model.number="standardSubagentLimit" />
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">
+            <div class="field-title">Standard Repair Limit</div>
+            <div class="field-description">Maximum bounded repair loops in Standard mode.</div>
+          </div>
+          <div class="field-control">
+            <input type="number" min="0" x-model.number="standardRepairLimit" />
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">
+            <div class="field-title">Pro Subagent Limit</div>
+            <div class="field-description">Maximum concurrent subagents in Pro mode.</div>
+          </div>
+          <div class="field-control">
+            <input type="number" min="0" x-model.number="proSubagentLimit" />
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">
+            <div class="field-title">Pro Repair Limit</div>
+            <div class="field-description">Maximum bounded repair loops in Pro mode.</div>
+          </div>
+          <div class="field-control">
+            <input type="number" min="0" x-model.number="proRepairLimit" />
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">
+            <div class="field-title">Ultra Subagent Limit</div>
+            <div class="field-description">Maximum concurrent subagents in Ultra mode.</div>
+          </div>
+          <div class="field-control">
+            <input type="number" min="0" x-model.number="ultraSubagentLimit" />
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">
+            <div class="field-title">Ultra Repair Limit</div>
+            <div class="field-description">Maximum bounded repair loops in Ultra mode.</div>
+          </div>
+          <div class="field-control">
+            <input type="number" min="0" x-model.number="ultraRepairLimit" />
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">
+            <div class="field-title">Protected Paths</div>
+            <div class="field-description">One filename or path per line that should always trigger a checkpoint.</div>
+          </div>
+          <div class="field-control">
+            <textarea x-model="protectedPathsText" rows="4"></textarea>
+          </div>
+        </div>
+      </div>
+    </template>
+  </div>
+
+  <style>
+    .agent-harness-config {
+      display: flex;
+      flex-direction: column;
+      gap: 0.9rem;
+    }
+
+    .field {
+      display: grid;
+      grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+      gap: 0.8rem;
+      align-items: start;
+    }
+
+    .field-label {
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+    }
+
+    .field-title {
+      font-weight: 600;
+    }
+
+    .field-description {
+      font-size: 0.82rem;
+      opacity: 0.72;
+    }
+
+    .field-control > input,
+    .field-control > select,
+    .field-control > textarea {
+      width: 100%;
+    }
+  </style>
+</body>
+</html>
