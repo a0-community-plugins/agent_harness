@@ -1,46 +1,63 @@
 ### harness_run
-manage the active agent harness run — this is your primary workflow orchestration tool
+manage the active Agent Harness run
 
-#### WORKFLOW: plan → dispatch → collect → verify → complete
-For any task that requires creating or modifying 2+ files:
-1. Use `action="plan"` to decompose into sub-tasks FIRST
-2. Use `action="dispatch"` to spawn parallel sub-agents for ready tasks
-3. Use `action="collect"` to harvest results as sub-agents finish
-4. Repeat dispatch/collect until all sub-tasks complete
-5. Run tests and use `action="verification"` to record results
-6. Use `action="complete"` to finish the run
+The active runtime prompt defines the current mode and phase. Follow it exactly.
 
-Do NOT skip planning and implement everything yourself under normal conditions. Sub-agents run in parallel and are faster.
-If sub-agent execution is unavailable or repeatedly failing, you may take over the work yourself and then use `action="adopt"` to reconcile the completed sub-task back into the graph.
+#### Mode boundary
 
-#### harness_run actions
-- `start`: begin a harness run with `mode`, `objective`, and optional `constraints`
-- `phase`: update the current phase with `phase`
-- `plan`: submit a task graph — REQUIRED before implementing multi-file work
-- `dispatch`: spawn parallel sub-agents for ready tasks (up to mode's subagent_limit)
-- `collect`: check progress and harvest results from parallel sub-agents
-- `adopt`: mark a planned sub-task as completed manually using `sub_task_id`, optional `summary`, and optional `result_files`
-- `task`: track a subtask using `task_title`, optional `task_status`, and optional `task_details`
-- `verification`: record a verification result with `verification_name`, `verification_status` (must be "passed", "failed", or "unknown"), and `verification_summary`
-- `failure`: note a failure summary when a repair loop needs context
-- `complete`: mark the current run complete after verification and summary
-- `status`: read back the current run state
-- `clean`: remove temporary workspace files (keeps outputs and run logs)
+- `flash`, `standard`, and `pro` are single-agent modes. Do not use `plan`,
+  `dispatch`, `collect`, or `adopt` in those modes.
+- `ultra` is the task-graph mode. It requires
+  `plan -> dispatch -> collect -> verify -> complete`.
+- Parallel workers share the project workspace. Only plan tasks whose edits do
+  not overlap. A worker that reaches an approval boundary stops so the main chat
+  can perform that action safely.
 
-usage:
+#### Actions
+
+- `start`: begin a run with `mode`, `objective`, and optional `constraints`
+- `status`: summarize the current run
+- `phase`: move to a valid lifecycle phase
+- `plan`: Ultra only; submit a non-empty task graph
+- `dispatch`: Ultra only; start ready tasks up to the configured worker limit
+- `collect`: Ultra only; harvest completed worker results
+- `adopt`: Ultra only; reconcile a failed or manually completed task with
+  `sub_task_id`, optional `summary`, and optional `result_files`
+- `task`: track a single-agent task item with `task_title`, optional
+  `task_status`, and optional `task_details`
+- `verification`: record a concrete check using `verification_name`,
+  `verification_status` (`passed`, `failed`, or `unknown`), and
+  `verification_summary`
+- `failure`: record a bounded repair failure
+- `clean`: clear temporary harness workspace data
+- `complete`: finish only after every planned task is complete and the latest
+  verification passed
+
+Ultra plan example:
+
 ~~~json
 {
-  "thoughts": [
-    "This task requires multiple files. I need to plan before implementing."
-  ],
-  "headline": "Planning the implementation",
   "tool_name": "harness_run",
   "tool_args": {
     "action": "plan",
     "sub_tasks": [
-      {"title": "Research existing patterns", "description": "Read the codebase to understand conventions", "role": "research"},
-      {"title": "Implement core module", "description": "Create the main module with business logic", "role": "code", "depends_on": [0]},
-      {"title": "Write tests", "description": "Create comprehensive tests", "role": "verify", "depends_on": [1]}
+      {
+        "title": "Research existing patterns",
+        "description": "Read the relevant code and report constraints",
+        "role": "research"
+      },
+      {
+        "title": "Implement the fix",
+        "description": "Change the isolated implementation files",
+        "role": "code",
+        "depends_on": [0]
+      },
+      {
+        "title": "Verify behavior",
+        "description": "Run the focused regression checks",
+        "role": "verify",
+        "depends_on": [1]
+      }
     ]
   }
 }

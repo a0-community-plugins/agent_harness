@@ -10,9 +10,16 @@ from helpers.defer import DeferredTask
 from initialize import initialize_agent
 
 from usr.plugins.agent_harness.helpers.models import (
-    RunRecord, SubTask, now_iso,
+    PARALLEL_WORKER_CONTEXT_KEY,
+    RunRecord,
+    SubTask,
+    now_iso,
 )
 from usr.plugins.agent_harness.helpers.orchestrator import build_scoped_context
+from usr.plugins.agent_harness.helpers.lifecycle import (
+    create_run_record,
+    save_current_run,
+)
 
 # Module-level registry of active background sub-agents.
 # DeferredTask objects are not serializable, so they live here instead of on RunRecord.
@@ -22,7 +29,9 @@ _INHERITED_CONTEXT_SKIP_KEYS = {
     Agent.DATA_NAME_SUPERIOR,
     Agent.DATA_NAME_SUBORDINATE,
     "agent_harness.current_run",
+    PARALLEL_WORKER_CONTEXT_KEY,
 }
+_RESULT_SUMMARY_LIMIT = 4_000
 
 
 @dataclass
@@ -50,11 +59,22 @@ def _clone_parent_context_data(parent_context: "AgentContext | None") -> dict[st
     return inherited or None
 
 
+def _registry_key(run_id: str, sub_task_id: str) -> str:
+    return f"{run_id}:{sub_task_id}"
+
+
+def _dispose_background(bg: BackgroundSubAgent) -> None:
+    try:
+        bg.deferred.kill(terminate_thread=True)
+    finally:
+        AgentContext.remove(bg.context.id)
+
+
 def registered_task_ids(run_id: str) -> set[str]:
     with _lock:
         return {
-            task_id
-            for task_id, bg in _active_tasks.items()
+            bg.sub_task_id
+            for bg in _active_tasks.values()
             if bg.run_id == run_id
         }
 
@@ -84,56 +104,94 @@ def spawn_parallel(
 ) -> list[str]:
     """Spawn background agents for each sub-task. Returns list of spawned IDs.
 
-    parent_context: if provided, all context data (model config, project settings,
-    plugin state) is copied to each child so sub-agents use the same LLM and
-    configuration as the parent. Each child still gets its own isolated history.
+    Parent configuration and safe context data are copied into each child so the
+    worker uses the selected profile and project settings while keeping isolated
+    history and harness state.
     """
+    prepared: list[BackgroundSubAgent] = []
     spawned_ids: list[str] = []
-    for sub_task in sub_tasks:
-        scoped_msg = build_scoped_context(sub_task, run)
+    inherited_data = _clone_parent_context_data(parent_context)
 
-        # Create an isolated background context and agent
-        config = initialize_agent()
+    try:
+        for sub_task in sub_tasks:
+            scoped_msg = build_scoped_context(sub_task, run)
+            config = (
+                deepcopy(parent_context.config)
+                if parent_context is not None
+                else initialize_agent()
+            )
+            ctx = AgentContext(
+                config=config,
+                type=AgentContextType.BACKGROUND,
+                set_current=False,
+                data=deepcopy(inherited_data) if inherited_data else None,
+            )
+            child_run = create_run_record(
+                context_id=ctx.id,
+                mode="flash",
+                objective=f"{sub_task.title}: {sub_task.description}".strip(": "),
+                constraints=[
+                    "Stay within the assigned sub-task.",
+                    "Stop if an action requires user approval.",
+                ],
+                settings=settings,
+                allow_broad_edits=run.allow_broad_edits,
+            )
+            child_run.phase = "implement"
+            save_current_run(ctx, child_run)
+            ctx.set_data(
+                PARALLEL_WORKER_CONTEXT_KEY,
+                {
+                    "parent_run_id": run.run_id,
+                    "parent_context_id": run.context_id,
+                    "sub_task_id": sub_task.id,
+                    "role": sub_task.role,
+                },
+                recursive=False,
+            )
 
-        # Copy ALL parent context data so the child inherits model config,
-        # project settings, plugin state, etc. This ensures the sub-agent
-        # uses the same LLM provider the user selected — not the system default.
-        inherited_data = _clone_parent_context_data(parent_context)
+            agent = ctx.agent0
+            agent.hist_add_user_message(
+                UserMessage(message=scoped_msg, attachments=[])
+            )
+            prepared.append(
+                BackgroundSubAgent(
+                    sub_task_id=sub_task.id,
+                    run_id=run.run_id,
+                    context=ctx,
+                    agent=agent,
+                    deferred=DeferredTask(
+                        thread_name=f"harness-{run.run_id}-{sub_task.id}"
+                    ),
+                )
+            )
 
-        ctx = AgentContext(
-            config=config,
-            type=AgentContextType.BACKGROUND,
-            set_current=False,
-            data=inherited_data,
-        )
-
-        agent = ctx.agent0
-
-        # Seed the agent with the scoped task context
-        agent.hist_add_user_message(
-            UserMessage(message=scoped_msg, attachments=[])
-        )
-
-        # Spawn the monologue in a background thread
-        thread_name = f"harness-{run.run_id}-{sub_task.id}"
-        deferred = DeferredTask(thread_name=thread_name)
-        deferred.start_task(agent.monologue)
-
-        bg = BackgroundSubAgent(
-            sub_task_id=sub_task.id,
-            run_id=run.run_id,
-            context=ctx,
-            agent=agent,
-            deferred=deferred,
-        )
-
+        for bg in prepared:
+            bg.deferred.start_task(bg.agent.monologue)
+            with _lock:
+                _active_tasks[
+                    _registry_key(bg.run_id, bg.sub_task_id)
+                ] = bg
+            sub_task = next(
+                task for task in sub_tasks if task.id == bg.sub_task_id
+            )
+            sub_task.status = "dispatched"
+            sub_task.dispatched_at = now_iso()
+            spawned_ids.append(sub_task.id)
+    except Exception:
         with _lock:
-            _active_tasks[sub_task.id] = bg
-
-        # Mark the sub-task as dispatched
-        sub_task.status = "dispatched"
-        sub_task.dispatched_at = now_iso()
-        spawned_ids.append(sub_task.id)
+            for bg in prepared:
+                _active_tasks.pop(
+                    _registry_key(bg.run_id, bg.sub_task_id),
+                    None,
+                )
+        for bg in prepared:
+            _dispose_background(bg)
+        for sub_task in sub_tasks:
+            if sub_task.id in spawned_ids:
+                sub_task.status = "pending"
+                sub_task.dispatched_at = ""
+        raise
 
     return spawned_ids
 
@@ -144,17 +202,16 @@ def poll_status(run_id: str) -> dict[str, str]:
     """
     results: dict[str, str] = {}
     with _lock:
-        for task_id, bg in list(_active_tasks.items()):
-            if bg.run_id != run_id:
-                continue
-            if not bg.deferred.is_ready():
-                results[task_id] = "running"
-            else:
-                try:
-                    bg.deferred.result_sync(timeout=0)
-                    results[task_id] = "completed"
-                except Exception:
-                    results[task_id] = "failed"
+        tasks = [bg for bg in _active_tasks.values() if bg.run_id == run_id]
+    for bg in tasks:
+        if not bg.deferred.is_ready():
+            results[bg.sub_task_id] = "running"
+        else:
+            try:
+                bg.deferred.result_sync(timeout=0)
+                results[bg.sub_task_id] = "completed"
+            except Exception:
+                results[bg.sub_task_id] = "failed"
     return results
 
 
@@ -164,45 +221,54 @@ def collect_completed(run: RunRecord) -> list[tuple[str, str | None, str | None]
     Removes completed/failed tasks from the registry.
     """
     collected: list[tuple[str, str | None, str | None]] = []
-    to_remove: list[str] = []
-
     with _lock:
-        for task_id, bg in list(_active_tasks.items()):
-            if bg.run_id != run.run_id:
-                continue
-            if not bg.deferred.is_ready():
-                continue
+        ready = [
+            bg
+            for bg in _active_tasks.values()
+            if bg.run_id == run.run_id and bg.deferred.is_ready()
+        ]
 
-            try:
-                result = bg.deferred.result_sync(timeout=0)
-                summary = str(result)[:500] if result else ""
-                collected.append((task_id, summary, None))
-            except Exception as exc:
-                collected.append((task_id, None, str(exc)))
-            to_remove.append(task_id)
-
-        for task_id in to_remove:
-            _active_tasks.pop(task_id, None)
+    for bg in ready:
+        try:
+            result = bg.deferred.result_sync(timeout=0)
+            summary = str(result)[:_RESULT_SUMMARY_LIMIT] if result else ""
+            collected.append((bg.sub_task_id, summary, None))
+        except Exception as exc:
+            collected.append((bg.sub_task_id, None, str(exc)))
+        with _lock:
+            _active_tasks.pop(
+                _registry_key(bg.run_id, bg.sub_task_id),
+                None,
+            )
+        _dispose_background(bg)
 
     return collected
 
 
 def kill_all(run_id: str) -> int:
     """Kill all background tasks for a run. Returns number killed."""
-    killed = 0
     with _lock:
-        to_remove = [
-            task_id for task_id, bg in _active_tasks.items()
-            if bg.run_id == run_id
+        selected = [
+            bg for bg in _active_tasks.values() if bg.run_id == run_id
         ]
-        for task_id in to_remove:
-            bg = _active_tasks.pop(task_id)
-            try:
-                bg.deferred.kill()
-            except Exception:
-                pass
-            killed += 1
-    return killed
+        for bg in selected:
+            _active_tasks.pop(
+                _registry_key(bg.run_id, bg.sub_task_id),
+                None,
+            )
+    for bg in selected:
+        _dispose_background(bg)
+    return len(selected)
+
+
+def kill_all_runs() -> int:
+    """Kill every plugin-owned background worker."""
+    with _lock:
+        selected = list(_active_tasks.values())
+        _active_tasks.clear()
+    for bg in selected:
+        _dispose_background(bg)
+    return len(selected)
 
 
 def active_count(run_id: str) -> int:

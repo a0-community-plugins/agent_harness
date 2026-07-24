@@ -5,53 +5,6 @@
   <script type="module">
     import { store } from "/plugins/agent_harness/webui/harness-store.js";
   </script>
-  <script type="module">
-    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
-    mermaid.initialize({
-      startOnLoad: false,
-      theme: "dark",
-      themeVariables: {
-        darkMode: true,
-        background: "transparent",
-        primaryColor: "#334155",
-        primaryBorderColor: "#475569",
-        primaryTextColor: "#e2e8f0",
-        lineColor: "#64748b",
-        secondaryColor: "#1e293b",
-        tertiaryColor: "#0f172a",
-      },
-      flowchart: { curve: "basis", padding: 12 },
-    });
-    window.__mermaidRender = async function(graphDef, el) {
-      try {
-        const id = "harness-graph-" + Date.now();
-        const { svg } = await mermaid.render(id, graphDef);
-        el.innerHTML = svg;
-      } catch (e) {
-        el.innerHTML = '<span style="opacity:0.5">Graph unavailable</span>';
-      }
-    };
-    window.__taskGraphToMermaid = function(taskGraph) {
-      if (!taskGraph?.sub_tasks?.length) return "";
-      const statusClass = { completed: "completed", dispatched: "dispatched", failed: "failed", pending: "pending" };
-      let lines = ["graph LR"];
-      for (const t of taskGraph.sub_tasks) {
-        const label = t.title.replace(/"/g, "'");
-        const cls = statusClass[t.status] || "pending";
-        lines.push(`  ${t.id}["${label}"]:::${cls}`);
-      }
-      for (const t of taskGraph.sub_tasks) {
-        for (const dep of (t.depends_on || [])) {
-          lines.push(`  ${dep} --> ${t.id}`);
-        }
-      }
-      lines.push("  classDef completed fill:#166534,stroke:#22c55e,color:#f0fdf4");
-      lines.push("  classDef dispatched fill:#854d0e,stroke:#eab308,color:#fefce8");
-      lines.push("  classDef failed fill:#991b1b,stroke:#ef4444,color:#fef2f2");
-      lines.push("  classDef pending fill:#334155,stroke:#64748b,color:#e2e8f0");
-      return lines.join("\n");
-    };
-  </script>
 </head>
 <body>
       <div x-data>
@@ -66,11 +19,19 @@
             <p class="agent-harness-copy">
               Drive deep coding workflows, surface checkpoints, and curate reusable rules without leaving the chat.
             </p>
+            <div class="agent-harness-mode-guide" aria-label="Harness mode summary">
+              <span><strong>Pro</strong> structured single agent</span>
+              <span><strong>Ultra</strong> task graph + 1-4 workers</span>
+            </div>
           </div>
           <div class="agent-harness-actions">
             <button class="button" @click="$store.agentHarness.refresh()">Refresh</button>
-            <button class="button confirm" @click="$store.agentHarness.startRun('pro')">Start Pro</button>
-            <button class="button" @click="$store.agentHarness.startRun('ultra')">Start Ultra</button>
+            <button class="button confirm"
+                    title="Structured single-agent workflow"
+                    @click="$store.agentHarness.startRun('pro')">Start Pro</button>
+            <button class="button"
+                    title="Mandatory task graph with 1-4 background workers"
+                    @click="$store.agentHarness.startRun('ultra')">Start Ultra</button>
             <button class="button" x-show="$store.agentHarness.currentRun" @click="$store.agentHarness.stopRun()">Stop Run</button>
           </div>
         </div>
@@ -98,6 +59,16 @@
                   <span class="agent-harness-meta-pill"
                         :class="'agent-harness-pill-risk-' + $store.agentHarness.currentRun.risk_level"
                         x-text="$store.agentHarness.currentRun.risk_level + ' risk'"></span>
+                  <span
+                    class="agent-harness-meta-pill"
+                    x-show="$store.agentHarness.currentRun.cost?.usage"
+                    x-text="'~' + ($store.agentHarness.currentRun.cost?.usage?.completion_tokens || 0).toLocaleString() + ' output tokens'"
+                  ></span>
+                  <span
+                    class="agent-harness-meta-pill"
+                    x-show="$store.agentHarness.currentRun.cost?.budget_limit > 0"
+                    x-text="($store.agentHarness.currentRun.cost?.budget_remaining || 0).toLocaleString() + ' budget remaining'"
+                  ></span>
                 </div>
                 <template x-if="$store.agentHarness.currentRun.tasks?.length">
                   <div class="agent-harness-subsection">
@@ -122,29 +93,39 @@
             <div class="agent-harness-card-header">
               <h3>Task Graph</h3>
               <span class="agent-harness-badge"
-                    x-text="($store.agentHarness.currentRun?.task_graph?.sub_tasks || []).length + ' tasks'"></span>
+                    x-text="($store.agentHarness.currentRun?.task_graph?.sub_tasks || []).filter(task => task.status === 'completed').length + '/' + ($store.agentHarness.currentRun?.task_graph?.sub_tasks || []).length + ' complete'"></span>
             </div>
-            <!-- Mermaid visual graph (loads async, may take a moment) -->
-            <div class="agent-harness-graph-container"
-                 x-ref="taskGraph"
-                 x-effect="
-                   if ($store.agentHarness.currentRun?.task_graph && window.__taskGraphToMermaid && window.__mermaidRender) {
-                     const def = window.__taskGraphToMermaid($store.agentHarness.currentRun.task_graph);
-                     if (def && $refs.taskGraph) window.__mermaidRender(def, $refs.taskGraph);
-                   }
-                 ">
+            <div class="agent-harness-progress" aria-hidden="true">
+              <div
+                class="agent-harness-progress-fill"
+                :style="'width:' + (
+                  100 * ($store.agentHarness.currentRun?.task_graph?.sub_tasks || []).filter(task => task.status === 'completed').length
+                  / Math.max(1, ($store.agentHarness.currentRun?.task_graph?.sub_tasks || []).length)
+                ) + '%'"
+              ></div>
             </div>
-            <!-- Always-visible text fallback showing sub-task status -->
-            <div class="agent-harness-stack compact" style="margin-top: 0.5rem;">
+            <div class="agent-harness-stack compact">
               <template x-for="task in ($store.agentHarness.currentRun?.task_graph?.sub_tasks || [])" :key="task.id">
-                <div class="agent-harness-list-row">
-                  <span>
+                <div class="agent-harness-list-panel agent-harness-task-panel">
+                  <div class="agent-harness-task-heading">
+                    <span>
                     <span class="agent-harness-task-dot"
                           :style="'background:' + ({completed:'#22c55e',dispatched:'#eab308',failed:'#ef4444',pending:'#64748b'}[task.status] || '#64748b')"></span>
-                    <span x-text="task.title"></span>
-                    <span style="opacity:0.5; font-size:0.8em;" x-text="'(' + task.role + ')'"></span>
-                  </span>
-                  <span class="agent-harness-list-status" x-text="task.status"></span>
+                      <span class="agent-harness-list-title" x-text="task.title"></span>
+                    </span>
+                    <span class="agent-harness-list-status" x-text="task.status"></span>
+                  </div>
+                  <div class="agent-harness-task-meta">
+                    <span x-text="task.role"></span>
+                    <template x-if="task.depends_on?.length">
+                      <span x-text="'after ' + task.depends_on.join(', ')"></span>
+                    </template>
+                  </div>
+                  <div
+                    class="agent-harness-list-copy"
+                    x-show="task.result_summary"
+                    x-text="task.result_summary"
+                  ></div>
                 </div>
               </template>
             </div>
@@ -244,6 +225,15 @@
       flex-direction: column;
       gap: 1rem;
       padding: 0.4rem;
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      overflow-x: clip;
+    }
+
+    .agent-harness-dashboard * {
+      min-width: 0;
+      box-sizing: border-box;
     }
 
     .agent-harness-hero {
@@ -279,6 +269,21 @@
       opacity: 0.8;
     }
 
+    .agent-harness-mode-guide {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem 0.8rem;
+      margin-top: 0.75rem;
+      font-size: 0.75rem;
+      opacity: 0.74;
+    }
+
+    .agent-harness-mode-guide span {
+      display: inline-flex;
+      gap: 0.28rem;
+      align-items: baseline;
+    }
+
     .agent-harness-actions {
       display: flex;
       gap: 0.5rem;
@@ -301,6 +306,7 @@
       background: color-mix(in srgb, var(--color-panel) 94%, transparent);
       border: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
       min-height: 220px;
+      overflow: hidden;
     }
 
     .agent-harness-card-header {
@@ -401,12 +407,14 @@
     .agent-harness-list-title {
       font-weight: 600;
       line-height: 1.35;
+      overflow-wrap: anywhere;
     }
 
     .agent-harness-list-copy {
       opacity: 0.78;
       font-size: 0.84rem;
       line-height: 1.45;
+      overflow-wrap: anywhere;
     }
 
     .agent-harness-inline-actions {
@@ -455,20 +463,40 @@
       grid-column: 1 / -1;
     }
 
-    .agent-harness-graph-container {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      min-height: 80px;
-      padding: 0.5rem;
-      border-radius: 10px;
-      background: color-mix(in srgb, var(--color-background) 50%, transparent);
-      overflow-x: auto;
+    .agent-harness-progress {
+      width: 100%;
+      height: 0.45rem;
+      overflow: hidden;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--color-border) 45%, transparent);
     }
 
-    .agent-harness-graph-container svg {
-      max-width: 100%;
-      height: auto;
+    .agent-harness-progress-fill {
+      height: 100%;
+      border-radius: inherit;
+      background: #22c55e;
+      transition: width 180ms ease;
+    }
+
+    .agent-harness-task-panel {
+      gap: 0.3rem;
+    }
+
+    .agent-harness-task-heading {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 0.75rem;
+    }
+
+    .agent-harness-task-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem 0.7rem;
+      padding-left: 0.9rem;
+      font-size: 0.72rem;
+      opacity: 0.62;
+      text-transform: capitalize;
     }
 
     .agent-harness-graph-legend {

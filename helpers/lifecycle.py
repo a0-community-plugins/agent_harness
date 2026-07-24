@@ -28,11 +28,24 @@ from usr.plugins.agent_harness.helpers.models import (
 )
 from usr.plugins.agent_harness.helpers.settings import get_mode_policy, get_default_mode
 
-# --- Structured regex for pytest output parsing (BUG FIX #2) ---
+# --- Structured test-output parsing ---
 
 PYTEST_FAILED_RE = re.compile(r"(\d+)\s+failed", re.IGNORECASE)
 PYTEST_PASSED_RE = re.compile(r"(\d+)\s+passed", re.IGNORECASE)
 PYTEST_ERROR_RE = re.compile(r"(\d+)\s+error", re.IGNORECASE)
+GENERIC_FAILED_RE = re.compile(
+    r"(^|\n)\s*(FAILED|FAIL)(\s|$)|"
+    r"test result:\s*FAILED|"
+    r"Tests:\s*(?:.*,\s*)?[1-9]\d*\s+failed",
+    re.IGNORECASE,
+)
+GENERIC_PASSED_RE = re.compile(
+    r"(^|\n)\s*OK\s*(\n|$)|"
+    r"test result:\s*ok\.|"
+    r"Tests:\s*(?:.*,\s*)?[1-9]\d*\s+passed|"
+    r"(^|\n)ok\s+\S+",
+    re.IGNORECASE,
+)
 
 
 def parse_verification_status(output: str) -> VerificationStatus:
@@ -42,8 +55,12 @@ def parse_verification_status(output: str) -> VerificationStatus:
         return "failed"
     if error_match and int(error_match.group(1)) > 0:
         return "failed"
+    if GENERIC_FAILED_RE.search(output):
+        return "failed"
     passed_match = PYTEST_PASSED_RE.search(output)
     if passed_match and int(passed_match.group(1)) > 0:
+        return "passed"
+    if GENERIC_PASSED_RE.search(output):
         return "passed"
     return "unknown"
 
@@ -188,10 +205,14 @@ def clear_current_run(context: AgentContext) -> None:
 
 
 def get_pending_checkpoint(run: RunRecord) -> CheckpointRecord | None:
-    for checkpoint in reversed(pending_checkpoints(run)):
-        if checkpoint.status == "pending":
-            return checkpoint
-    return None
+    return next(
+        (
+            checkpoint
+            for checkpoint in reversed(run.checkpoints)
+            if checkpoint.status == "pending"
+        ),
+        None,
+    )
 
 
 # --- Run control ---
@@ -236,7 +257,7 @@ def upsert_task(run: RunRecord, title: str, status: str = "active", details: str
     return task
 
 
-# --- Verification recording (BUG FIX #5: passed -> summarize, not verify) ---
+# --- Verification recording ---
 
 def record_verification(
     run: RunRecord,
@@ -284,7 +305,7 @@ def record_failure(
     return record
 
 
-# --- Tool activity recording (BUG FIX #2: structured regex for verification) ---
+# --- Tool activity recording ---
 
 def record_tool_activity(
     *,
@@ -294,7 +315,11 @@ def record_tool_activity(
     tool_response: str = "",
 ) -> None:
     run.last_tool_name = tool_name
-    if tool_name == "text_editor":
+    if str(tool_name).split(":", 1)[0] in {"text_editor", "text_editor_remote"}:
+        from usr.plugins.agent_harness.helpers.guardrails import is_file_mutation
+
+        if not is_file_mutation(tool_name, tool_args):
+            return
         path = str(tool_args.get("path", "")).strip()
         if path:
             normalized = _normalize_path(path)
@@ -302,11 +327,6 @@ def record_tool_activity(
                 run.touched_files.append(path)
         if run.status != "blocked":
             run.phase = "implement"
-        return
-
-    if tool_name == "call_subordinate":
-        title = str(tool_args.get("message", "")).strip() or "Parallel subtask"
-        upsert_task(run, title=title[:120], status="completed")
         return
 
     if tool_name == "code_execution_tool":
@@ -330,16 +350,32 @@ def record_tool_activity(
 
 # --- Run completion ---
 
+def completion_blocker(run: RunRecord) -> str:
+    if run.status == "blocked":
+        return "The run is blocked by an unresolved checkpoint."
+    if run.task_graph and not run.task_graph.is_successful():
+        unfinished = [
+            task
+            for task in run.task_graph.sub_tasks
+            if task.status != "completed"
+        ]
+        names = ", ".join(task.title for task in unfinished[:5])
+        return (
+            f"{len(unfinished)} task(s) are unfinished: {names}. "
+            "Dispatch pending tasks or repair and adopt failed tasks first."
+        )
+    latest = latest_verification_record(run)
+    if not latest or latest.status != "passed":
+        return (
+            "A passing verification record is required. Run an appropriate check, "
+            "then record its concrete result."
+        )
+    return ""
+
+
 def complete_run(run: RunRecord) -> RunRecord:
     if run.status == "blocked":
         return run
-    # Auto-mark any remaining pending/dispatched tasks as skipped
-    if run.task_graph:
-        for task in run.task_graph.sub_tasks:
-            if task.status in ("pending", "dispatched"):
-                task.status = "completed"
-                task.result_summary = "Skipped — agent completed work directly"
-                task.completed_at = now_iso()
     run.phase = "complete"
     run.status = "completed"
     run.completed_at = now_iso()

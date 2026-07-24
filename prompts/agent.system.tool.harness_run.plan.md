@@ -1,27 +1,16 @@
-### Planning with harness_run
+### Ultra planning with harness_run
 
-When the harness is in `plan` phase, decompose the objective into sub-tasks using `harness_run action="plan"`.
+`harness_run action="plan"` is available only in Ultra mode.
 
-Each sub-task should be independently executable by a sub-agent. Use roles:
-- `research`: gather information, read docs, explore code
-- `code`: implement features, fix bugs, write code
-- `verify`: run tests, validate output
-- `synthesize`: combine results from other sub-tasks
+Create at least one scoped sub-task. Use roles:
 
-Reference dependencies by index (0-based). Example:
+- `research`: read code or primary documentation and report evidence
+- `code`: implement a non-overlapping change
+- `verify`: run focused checks
+- `synthesize`: combine completed dependency results
 
-~~~json
-{
-  "tool_name": "harness_run",
-  "tool_args": {
-    "action": "plan",
-    "sub_tasks": [
-      {"title": "Research Stripe API", "description": "Read webhook documentation", "role": "research"},
-      {"title": "Implement handler", "description": "Write webhook endpoint", "role": "code", "depends_on": [0]},
-      {"title": "Write tests", "description": "Test the handler", "role": "verify", "depends_on": [1]}
-    ]
-  }
-}
-~~~
-
-After planning, use `action="dispatch"` to get dispatch instructions for ready sub-tasks.
+Dependencies are zero-based indexes into the submitted list. Parallel workers
+share the same filesystem, so never dispatch code tasks that may edit the same
+files. After the plan is accepted, use `dispatch`, then `collect`, until every
+task is complete. Run a final integrated verification in the main chat before
+completing the run.

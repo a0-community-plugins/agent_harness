@@ -3,7 +3,7 @@ request a mandatory checkpoint before risky actions — the user must approve be
 
 #### WHEN TO USE (MANDATORY — do not skip):
 - Before running pip install, npm install, apt-get install, or any package manager
-- Before git push, git reset --hard, or any destructive git operation
+- Before git commit, push, merge, rebase, branch, tag, stash, reset, or another repository-changing Git operation
 - Before rm -rf or any recursive file deletion
 - Before modifying files in protected paths (agent.py, initialize.py, usr/plugins/)
 - Before any action that cannot be easily undone
@@ -22,7 +22,16 @@ usage:
   "tool_args": {
     "reason": "Need to install the 'rich' library for terminal formatting.",
     "proposed_action": "pip install rich",
-    "risk_level": "high"
+    "risk_level": "high",
+    "target_tool_name": "code_execution_tool",
+    "target_tool_args": {
+      "runtime": "terminal",
+      "code": "pip install rich"
+    }
   }
 }
 ~~~
+
+Approval is action-bound and single-use. After approval, run the exact target
+tool once. Do not alter its arguments and do not retry it without requesting a
+new checkpoint.

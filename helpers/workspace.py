@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import shutil
 from pathlib import Path
 from typing import Any
@@ -8,7 +7,7 @@ from typing import Any
 from usr.plugins.agent_harness.helpers.models import WorkspacePaths
 
 WORKSPACE_ROOT = ".harness"
-GITIGNORE_ENTRIES = [".harness/workspace/", ".harness/offloads/", ".harness/threads/"]
+MAX_LISTED_FILES = 1_000
 
 
 def _safe_context_segment(context_id: str) -> str:
@@ -27,74 +26,29 @@ def ensure_workspace(project_dir: str, context_id: str = "") -> WorkspacePaths:
         workspace=str(workspace_dir),
         outputs=str(outputs_dir),
         uploads=str(uploads_dir),
-        offloads=str(root / "offloads"),
-        runs=str(root / "runs"),
         thread_root=str(thread_root) if thread_root else "",
         user_data=str(user_data) if user_data else "",
     )
-    for p in [paths.workspace, paths.outputs, paths.uploads, paths.offloads, paths.runs]:
+    for p in [paths.workspace, paths.outputs, paths.uploads]:
         Path(p).mkdir(parents=True, exist_ok=True)
     return paths
 
 
-def ensure_gitignore(project_dir: str) -> None:
-    gitignore_path = Path(project_dir) / ".gitignore"
-    existing = gitignore_path.read_text() if gitignore_path.exists() else ""
-    lines_to_add = [e for e in GITIGNORE_ENTRIES if e not in existing]
-    if lines_to_add:
-        suffix = "\n" if existing and not existing.endswith("\n") else ""
-        gitignore_path.write_text(
-            existing + suffix + "\n".join(lines_to_add) + "\n"
-        )
-
-
-def sub_task_workspace(paths: WorkspacePaths, sub_task_id: str) -> str:
-    p = Path(paths.workspace) / sub_task_id
-    p.mkdir(parents=True, exist_ok=True)
-    return str(p)
-
-
-def write_offload(paths: WorkspacePaths, offload_id: str, content: str) -> str:
-    filepath = Path(paths.offloads) / f"{offload_id}.md"
-    filepath.write_text(content)
-    return str(filepath)
-
-
-def write_run_log(paths: WorkspacePaths, run_data: dict) -> str:
-    filepath = Path(paths.runs) / f"{run_data.get('run_id', 'unknown')}.json"
-    filepath.write_text(json.dumps(run_data, indent=2))
-    return str(filepath)
-
-
 def clean_workspace(paths: WorkspacePaths) -> None:
-    for p in [paths.workspace, paths.offloads]:
-        if Path(p).exists():
-            shutil.rmtree(p)
+    if Path(paths.workspace).exists():
+        shutil.rmtree(paths.workspace)
 
 
 def save_upload(paths: WorkspacePaths, filename: str, content: bytes) -> str:
-    filepath = Path(paths.uploads) / filename
-    filepath.parent.mkdir(parents=True, exist_ok=True)
+    if not filename or Path(filename).name != filename or filename in {".", ".."}:
+        raise ValueError("Upload filename must be a single safe path segment")
+    filepath = resolve_upload(paths, filename, create_parent=True)
     filepath.write_bytes(content)
     return str(filepath)
 
 
 def list_uploads(paths: WorkspacePaths) -> list[dict[str, Any]]:
-    uploads_root = Path(paths.uploads)
-    if not uploads_root.exists():
-        return []
-    results: list[dict[str, Any]] = []
-    for file_path in sorted(p for p in uploads_root.rglob("*") if p.is_file()):
-        relative = file_path.relative_to(uploads_root).as_posix()
-        results.append(
-            {
-                "name": file_path.name,
-                "path": relative,
-                "abs_path": str(file_path),
-                "size": file_path.stat().st_size,
-            }
-        )
-    return results
+    return _list_safe_files(Path(paths.uploads))
 
 
 def delete_upload(paths: WorkspacePaths, relative_path: str) -> bool:
@@ -121,21 +75,7 @@ def resolve_upload(
 
 
 def list_artifacts(paths: WorkspacePaths) -> list[dict[str, Any]]:
-    outputs_root = Path(paths.outputs)
-    if not outputs_root.exists():
-        return []
-    results: list[dict[str, Any]] = []
-    for file_path in sorted(p for p in outputs_root.rglob("*") if p.is_file()):
-        relative = file_path.relative_to(outputs_root).as_posix()
-        results.append(
-            {
-                "name": file_path.name,
-                "path": relative,
-                "abs_path": str(file_path),
-                "size": file_path.stat().st_size,
-            }
-        )
-    return results
+    return _list_safe_files(Path(paths.outputs))
 
 
 def resolve_artifact(paths: WorkspacePaths, relative_path: str) -> Path:
@@ -149,3 +89,33 @@ def resolve_artifact(paths: WorkspacePaths, relative_path: str) -> Path:
 def cleanup_thread_data(paths: WorkspacePaths) -> None:
     if paths.thread_root and Path(paths.thread_root).exists():
         shutil.rmtree(paths.thread_root)
+
+
+def _list_safe_files(root: Path) -> list[dict[str, Any]]:
+    try:
+        resolved_root = root.resolve()
+    except (OSError, RuntimeError):
+        return []
+    if not resolved_root.exists():
+        return []
+
+    results: list[dict[str, Any]] = []
+    for file_path in sorted(resolved_root.rglob("*")):
+        try:
+            resolved_file = file_path.resolve(strict=True)
+            if not resolved_file.is_file() or not resolved_file.is_relative_to(resolved_root):
+                continue
+            relative = file_path.relative_to(resolved_root).as_posix()
+            size = resolved_file.stat().st_size
+        except (OSError, RuntimeError, ValueError):
+            continue
+        results.append(
+            {
+                "name": file_path.name,
+                "path": relative,
+                "size": size,
+            }
+        )
+        if len(results) >= MAX_LISTED_FILES:
+            break
+    return results

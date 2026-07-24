@@ -34,6 +34,10 @@ class HarnessMemoryPropose(Tool):
         settings = runtime.load_agent_settings(self.agent)
         run = runtime.ensure_run(self.agent, settings=settings)
         normalized_scope = _coerce_scope(scope)
+        project_name = projects.get_context_project_name(self.agent.context) or ""
+        agent_profile = self.agent.config.profile or ""
+        if normalized_scope == "project" and not project_name:
+            normalized_scope = "agent" if agent_profile else "global"
 
         for existing in run.memory_candidates:
             if existing.rule_text.strip().lower() != text.lower():
@@ -51,13 +55,11 @@ class HarnessMemoryPropose(Tool):
             reason=explanation or "Reusable harness rule identified.",
             source=str(source or runtime.PLUGIN_NAME).strip(),
             scope=normalized_scope,
-            confidence=float(confidence),
+            confidence=_coerce_confidence(confidence),
         )
         runtime.save_current_run(self.agent.context, run)
 
         if not settings.get("memory_curation_enabled", True):
-            project_name = projects.get_context_project_name(self.agent.context) or ""
-            agent_profile = self.agent.config.profile or ""
             accepted = await runtime.accept_memory_candidate(
                 context=self.agent.context,
                 candidate_id=candidate.id,
@@ -74,3 +76,13 @@ class HarnessMemoryPropose(Tool):
             message=f"Memory proposal queued for review: {candidate.rule_text}",
             break_loop=False,
         )
+
+
+def _coerce_confidence(value: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        parsed = 0.7
+    if parsed != parsed:
+        parsed = 0.7
+    return min(1.0, max(0.0, parsed))

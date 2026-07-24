@@ -13,6 +13,7 @@ from helpers import files, plugins
 PLUGIN_NAME = "agent_harness"
 RUN_CONTEXT_KEY = "agent_harness.current_run"
 OUTPUT_CONTEXT_KEY = "agent_harness"
+PARALLEL_WORKER_CONTEXT_KEY = "agent_harness.parallel_worker"
 
 HarnessMode = Literal["flash", "standard", "pro", "ultra"]
 HarnessPhase = Literal[
@@ -34,16 +35,36 @@ MemoryCandidateStatus = Literal["proposed", "accepted", "rejected"]
 VerificationStatus = Literal["passed", "failed", "unknown"]
 
 DEPENDENCY_INSTALL_RE = re.compile(
-    r"(^|\s)(pip|pip3|uv\s+pip|npm|pnpm|yarn|poetry|apt|apt-get|brew)\s+"
-    r"(install|add)\b",
+    r"\b("
+    r"(?:python(?:3(?:\.\d+)?)?\s+-m\s+)?pip(?:3)?\s+(?:-[^\s]+\s+)*install|"
+    r"uv\s+(?:pip\s+install|add)|"
+    r"(?:npm|pnpm|yarn|poetry)\s+(?:install|add)|"
+    r"(?:apt|apt-get|brew|apk|dnf|yum|conda|mamba)\s+(?:[^\n;&|]*\s)?(?:install|add)"
+    r")\b",
     re.IGNORECASE,
 )
 DESTRUCTIVE_COMMAND_RE = re.compile(
-    r"(rm\s+-[^\n]*\b[rRfF]+\b|git\s+reset\s+--hard|git\s+checkout\s+--|del\s+/f)",
+    r"("
+    r"rm\s+(?:-[^\n;&|]*[rR][^\n;&|]*|--recursive)\b|"
+    r"git\s+reset\s+--hard|git\s+checkout\s+--|git\s+clean\s+-[^\s]*[fdx]|"
+    r"del\s+/f"
+    r")",
+    re.IGNORECASE,
+)
+GIT_MUTATION_COMMAND_RE = re.compile(
+    r"\bgit\s+(?:-[Cc]\s+\S+\s+)*("
+    r"add|commit|push|merge|rebase|cherry-pick|revert|reset|checkout|switch|"
+    r"clean|tag|stash|branch\s+-[dDmM]"
+    r")\b",
     re.IGNORECASE,
 )
 VERIFICATION_COMMAND_RE = re.compile(
-    r"\b(pytest|npm\s+test|pnpm\s+test|yarn\s+test|uv\s+run\s+pytest)\b",
+    r"\b("
+    r"pytest|uv\s+run\s+pytest|python(?:3)?\s+-m\s+unittest|"
+    r"npm\s+(?:run\s+)?test|pnpm\s+(?:run\s+)?test|yarn\s+test|bun\s+test|"
+    r"cargo\s+test|go\s+test|dotnet\s+test|mvn\s+test|gradle\s+test|"
+    r"xcodebuild\b[^\n]*\btest"
+    r")\b",
     re.IGNORECASE,
 )
 DEFAULT_RUN_OBJECTIVE = "Active coding task"
@@ -73,8 +94,10 @@ class CheckpointRecord(BaseModel):
     status: CheckpointStatus = "pending"
     decision_comment: str = ""
     sub_task_id: str = ""
+    action_fingerprint: str = ""
     created_at: str
     decided_at: str = ""
+    consumed_at: str = ""
 
 
 class VerificationRecord(BaseModel):
@@ -138,6 +161,11 @@ class TaskGraph(BaseModel):
     def is_complete(self) -> bool:
         return all(t.status in ("completed", "failed") for t in self.sub_tasks)
 
+    def is_successful(self) -> bool:
+        return bool(self.sub_tasks) and all(
+            t.status == "completed" for t in self.sub_tasks
+        )
+
     def has_cycle(self) -> bool:
         adj: dict[str, list[str]] = {t.id: list(t.depends_on) for t in self.sub_tasks}
         visited: set[str] = set()
@@ -155,25 +183,6 @@ class TaskGraph(BaseModel):
             return False
 
         return any(dfs(t.id) for t in self.sub_tasks if t.id not in visited)
-
-
-ContextStatus = Literal["normal", "elevated", "critical"]
-
-
-class ContextPressure(BaseModel):
-    estimated_tokens: int
-    threshold_pct: float
-    status: ContextStatus
-    last_assessed_at: str
-
-
-class OffloadRecord(BaseModel):
-    id: str
-    sub_task_id: str = ""
-    content_type: str
-    file_path: str
-    summary: str
-    created_at: str
 
 
 class TokenUsage(BaseModel):
@@ -196,8 +205,6 @@ class WorkspacePaths(BaseModel):
     workspace: str
     outputs: str
     uploads: str = ""
-    offloads: str
-    runs: str
     thread_root: str = ""
     user_data: str = ""
 
@@ -220,7 +227,6 @@ class RunRecord(BaseModel):
     allow_broad_edits: bool = False
     last_tool_name: str = ""
     task_graph: TaskGraph | None = None
-    offloads: list[OffloadRecord] = Field(default_factory=list)
     cost: CostRecord | None = None
     workspace: WorkspacePaths | None = None
     created_at: str

@@ -1,0 +1,692 @@
+<script type="module">
+  import { store } from "/plugins/agent_harness/webui/harness-store.js";
+</script>
+
+<style>
+  [x-cloak] { display: none !important; }
+
+  .ahc {
+    --ahc-border: color-mix(in srgb, var(--color-border) 68%, transparent);
+    --ahc-panel: color-mix(in srgb, var(--color-panel) 94%, #000 6%);
+    --ahc-muted: color-mix(in srgb, var(--color-text) 62%, transparent);
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    color: var(--color-text);
+    background:
+      linear-gradient(var(--ahc-border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--ahc-border) 1px, transparent 1px);
+    background-size: 32px 32px;
+    background-color: var(--color-background);
+  }
+
+  .ahc *,
+  .ahc *::before,
+  .ahc *::after {
+    box-sizing: border-box;
+    min-width: 0;
+  }
+
+  .ahc-header {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.72rem 0.85rem;
+    border-bottom: 1px solid var(--ahc-border);
+    background: color-mix(in srgb, var(--color-panel) 96%, transparent);
+    backdrop-filter: blur(12px);
+  }
+
+  .ahc-identity {
+    display: flex;
+    align-items: center;
+    gap: 0.62rem;
+  }
+
+  .ahc-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    flex: 0 0 auto;
+    border: 1px solid color-mix(in srgb, var(--color-highlight) 45%, var(--ahc-border));
+    border-radius: 0.45rem;
+    background: color-mix(in srgb, var(--color-highlight) 11%, transparent);
+    color: var(--color-highlight);
+  }
+
+  .ahc-mark .material-symbols-outlined { font-size: 1.15rem; }
+
+  .ahc-title {
+    font-size: 0.86rem;
+    font-weight: 760;
+    letter-spacing: 0.015em;
+  }
+
+  .ahc-subtitle {
+    margin-top: 0.12rem;
+    color: var(--ahc-muted);
+    font-size: 0.65rem;
+  }
+
+  .ahc-sync {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.38rem;
+    min-height: 1.7rem;
+    padding: 0.22rem 0.42rem;
+    border: 1px solid transparent;
+    border-radius: 0.38rem;
+    background: transparent;
+    color: var(--ahc-muted);
+    font: inherit;
+    font-size: 0.65rem;
+    white-space: nowrap;
+    cursor: pointer;
+    box-shadow: none;
+    transition:
+      background-color 150ms ease,
+      border-color 150ms ease,
+      color 150ms ease;
+  }
+
+  .ahc-sync:hover {
+    border-color: var(--ahc-border);
+    background: color-mix(in srgb, var(--color-background-hover) 68%, transparent);
+    color: var(--color-text);
+  }
+
+  .ahc-sync:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-highlight) 58%, transparent);
+    outline-offset: 2px;
+  }
+
+  .ahc-sync::before {
+    content: "";
+    width: 0.42rem;
+    height: 0.42rem;
+    border-radius: 50%;
+    background: #22c55e;
+    box-shadow: 0 0 0 2px color-mix(in srgb, #22c55e 16%, transparent);
+  }
+
+  .ahc-sync.is-loading::before {
+    background: var(--color-warning-text);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-warning-text) 16%, transparent);
+  }
+
+  .ahc-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 0.72rem;
+    padding: 0.78rem 0.82rem 1rem;
+    scrollbar-width: thin;
+    scrollbar-color: var(--ahc-border) transparent;
+  }
+
+  .ahc-alert {
+    display: flex;
+    gap: 0.48rem;
+    padding: 0.62rem 0.7rem;
+    border: 1px solid color-mix(in srgb, var(--color-error-text) 48%, var(--ahc-border));
+    border-radius: 0.45rem;
+    background: color-mix(in srgb, var(--color-error-text) 9%, var(--ahc-panel));
+    font-size: 0.72rem;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+  }
+
+  .ahc-alert .material-symbols-outlined {
+    flex: 0 0 auto;
+    font-size: 1rem;
+    color: var(--color-error-text);
+  }
+
+  .ahc-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.62rem;
+    padding: 0.75rem;
+    border: 1px solid var(--ahc-border);
+    border-radius: 0.48rem;
+    background: var(--ahc-panel);
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.08);
+  }
+
+  .ahc-card.is-attention {
+    border-color: color-mix(in srgb, var(--color-warning-text) 52%, var(--ahc-border));
+  }
+
+  .ahc-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.55rem;
+  }
+
+  .ahc-card-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.38rem;
+    margin: 0;
+    font-size: 0.71rem;
+    font-weight: 760;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--ahc-muted);
+  }
+
+  .ahc-card-title .material-symbols-outlined { font-size: 0.95rem; }
+
+  .ahc-badge {
+    display: inline-flex;
+    align-items: center;
+    max-width: 14rem;
+    padding: 0.18rem 0.45rem;
+    border: 1px solid var(--ahc-border);
+    border-radius: 999px;
+    color: var(--ahc-muted);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.59rem;
+    font-weight: 720;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ahc-badge.is-active {
+    border-color: color-mix(in srgb, var(--color-highlight) 44%, var(--ahc-border));
+    background: color-mix(in srgb, var(--color-highlight) 10%, transparent);
+    color: var(--color-text);
+  }
+
+  .ahc-objective {
+    font-size: 0.88rem;
+    font-weight: 680;
+    line-height: 1.38;
+    overflow-wrap: anywhere;
+  }
+
+  .ahc-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.38rem;
+  }
+
+  .ahc-metric {
+    padding: 0.45rem 0.5rem;
+    border: 1px solid var(--ahc-border);
+    border-radius: 0.38rem;
+    background: color-mix(in srgb, var(--color-background) 55%, transparent);
+  }
+
+  .ahc-metric-value {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.72rem;
+    font-weight: 740;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ahc-metric-label {
+    margin-top: 0.18rem;
+    color: var(--ahc-muted);
+    font-size: 0.57rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .ahc-phase-track {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 0.24rem;
+  }
+
+  .ahc-phase {
+    height: 0.28rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--color-border) 50%, transparent);
+  }
+
+  .ahc-phase.is-current {
+    background: var(--color-highlight);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-highlight) 12%, transparent);
+  }
+
+  .ahc-phase-label {
+    margin-top: -0.22rem;
+    color: var(--ahc-muted);
+    font-size: 0.6rem;
+    text-align: right;
+  }
+
+  .ahc-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.38rem;
+  }
+
+  .ahc-button {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3rem;
+    min-height: 1.9rem;
+    padding: 0.34rem 0.62rem;
+    border: 1px solid var(--ahc-border);
+    border-radius: 0.4rem;
+    background: color-mix(in srgb, var(--color-background) 52%, transparent);
+    color: var(--color-text);
+    font: inherit;
+    font-size: 0.68rem;
+    font-weight: 680;
+    cursor: pointer;
+  }
+
+  .ahc-button:hover {
+    border-color: color-mix(in srgb, var(--color-highlight) 50%, var(--ahc-border));
+    background: var(--color-background-hover);
+  }
+
+  .ahc-button:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-highlight) 60%, transparent);
+    outline-offset: 2px;
+  }
+
+  .ahc-button.is-primary {
+    border-color: var(--color-highlight);
+    background: var(--color-highlight);
+    color: #fff;
+  }
+
+  .ahc-button.is-danger {
+    color: var(--color-error-text);
+    border-color: color-mix(in srgb, var(--color-error-text) 42%, var(--ahc-border));
+  }
+
+  .ahc-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .ahc-row {
+    display: grid;
+    grid-template-columns: 0.42rem minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 0.5rem;
+    padding: 0.5rem 0.55rem;
+    border: 1px solid var(--ahc-border);
+    border-radius: 0.4rem;
+    background: color-mix(in srgb, var(--color-background) 48%, transparent);
+  }
+
+  .ahc-dot {
+    width: 0.42rem;
+    height: 0.42rem;
+    margin-top: 0.24rem;
+    border-radius: 50%;
+    background: var(--ahc-muted);
+  }
+
+  .ahc-dot.status-completed { background: #22c55e; }
+  .ahc-dot.status-dispatched { background: var(--color-warning-text); }
+  .ahc-dot.status-failed { background: var(--color-error-text); }
+
+  .ahc-row-title {
+    font-size: 0.74rem;
+    font-weight: 680;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+
+  .ahc-row-copy {
+    margin-top: 0.2rem;
+    color: var(--ahc-muted);
+    font-size: 0.65rem;
+    line-height: 1.42;
+    overflow-wrap: anywhere;
+  }
+
+  .ahc-row-status {
+    color: var(--ahc-muted);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.58rem;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .ahc-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.55rem;
+    padding: 0.3rem 0;
+  }
+
+  .ahc-empty-title {
+    font-size: 0.86rem;
+    font-weight: 720;
+  }
+
+  .ahc-empty-copy {
+    max-width: 48ch;
+    color: var(--ahc-muted);
+    font-size: 0.7rem;
+    line-height: 1.5;
+  }
+
+  .ahc-decision {
+    display: flex;
+    gap: 0.32rem;
+    grid-column: 2 / -1;
+  }
+
+  @media (max-width: 34rem) {
+    .ahc-header { padding-inline: 0.68rem; }
+    .ahc-body { padding-inline: 0.68rem; }
+    .ahc-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .ahc-sync span { display: none; }
+    .ahc-row { grid-template-columns: 0.42rem minmax(0, 1fr); }
+    .ahc-row-status { grid-column: 2; }
+  }
+</style>
+
+<div
+  x-data
+  x-create="$store.agentHarness.onMount()"
+  x-destroy="$store.agentHarness.cleanup()"
+  class="ahc"
+  x-cloak
+>
+  <header class="ahc-header">
+    <div class="ahc-identity">
+      <span class="ahc-mark" aria-hidden="true">
+        <span class="material-symbols-outlined">conversion_path</span>
+      </span>
+      <div>
+        <div class="ahc-title">Agent Harness</div>
+        <div class="ahc-subtitle">Task graph · gates · verification</div>
+      </div>
+    </div>
+    <button
+      type="button"
+      class="ahc-sync"
+      :class="{ 'is-loading': $store.agentHarness.isLoading }"
+      @click="$store.agentHarness.refresh()"
+      title="Refresh harness state"
+    >
+      <span x-text="$store.agentHarness.isLoading ? 'Syncing' : 'Synced'">Synced</span>
+    </button>
+  </header>
+
+  <main class="ahc-body">
+    <div class="ahc-alert" x-show="$store.agentHarness.error" role="status">
+      <span class="material-symbols-outlined" aria-hidden="true">sync_problem</span>
+      <span x-text="$store.agentHarness.error"></span>
+    </div>
+
+    <section class="ahc-card">
+      <div class="ahc-card-head">
+        <h2 class="ahc-card-title">
+          <span class="material-symbols-outlined" aria-hidden="true">route</span>
+          Active run
+        </h2>
+        <span
+          class="ahc-badge"
+          :class="{ 'is-active': $store.agentHarness.currentRun }"
+          x-text="$store.agentHarness.currentRun
+            ? $store.agentHarness.statusButtonLabel()
+            : 'Idle'"
+        >Idle</span>
+      </div>
+
+      <template x-if="$store.agentHarness.currentRun">
+        <div class="ahc-list">
+          <div class="ahc-objective" x-text="$store.agentHarness.currentRun.objective"></div>
+
+          <div class="ahc-metrics">
+            <div class="ahc-metric">
+              <div class="ahc-metric-value" x-text="$store.agentHarness.currentRun.risk_level"></div>
+              <div class="ahc-metric-label">Risk</div>
+            </div>
+            <div class="ahc-metric">
+              <div
+                class="ahc-metric-value"
+                x-text="($store.agentHarness.currentRun.cost?.usage?.total_tokens || 0).toLocaleString()"
+              ></div>
+              <div class="ahc-metric-label">Tokens</div>
+            </div>
+            <div class="ahc-metric">
+              <div
+                class="ahc-metric-value"
+                x-text="$store.agentHarness.totalGraphTasks
+                  ? $store.agentHarness.completedGraphTasks + '/' + $store.agentHarness.totalGraphTasks
+                  : '—'"
+              ></div>
+              <div class="ahc-metric-label">Graph</div>
+            </div>
+          </div>
+
+          <div
+            class="ahc-phase-track"
+            aria-label="Harness phase"
+            :title="'Current phase: ' + $store.agentHarness.phaseLabel($store.agentHarness.currentRun.phase)"
+          >
+            <template x-for="phase in ['inspect', 'plan', 'implement', 'verify', 'repair', 'complete']" :key="phase">
+              <span
+                class="ahc-phase"
+                :class="{ 'is-current': $store.agentHarness.currentRun.phase === phase }"
+              ></span>
+            </template>
+          </div>
+          <div
+            class="ahc-phase-label"
+            x-text="$store.agentHarness.phaseLabel($store.agentHarness.currentRun.phase)"
+          ></div>
+
+          <div class="ahc-actions">
+            <button
+              type="button"
+              class="ahc-button"
+              @click="$store.agentHarness.refresh()"
+            >Refresh</button>
+            <button
+              type="button"
+              class="ahc-button is-danger"
+              @click="$store.agentHarness.stopRun()"
+            >Stop run</button>
+          </div>
+        </div>
+      </template>
+
+      <template x-if="!$store.agentHarness.currentRun">
+        <div class="ahc-empty">
+          <div class="ahc-empty-title">No harness run in this chat</div>
+          <div class="ahc-empty-copy">
+            Pro keeps one coding agent inside a structured workflow. Ultra adds
+            a mandatory task graph and one to four bounded workers.
+          </div>
+          <div class="ahc-actions">
+            <button
+              type="button"
+              class="ahc-button is-primary"
+              @click="$store.agentHarness.startRun('pro')"
+            >Start Pro</button>
+            <button
+              type="button"
+              class="ahc-button"
+              @click="$store.agentHarness.startRun('ultra')"
+            >Start Ultra</button>
+          </div>
+        </div>
+      </template>
+    </section>
+
+    <section
+      class="ahc-card is-attention"
+      x-show="$store.agentHarness.pendingCheckpoints.length"
+    >
+      <div class="ahc-card-head">
+        <h2 class="ahc-card-title">
+          <span class="material-symbols-outlined" aria-hidden="true">approval</span>
+          Approval gates
+        </h2>
+        <span class="ahc-badge" x-text="$store.agentHarness.pendingCheckpoints.length"></span>
+      </div>
+      <div class="ahc-list">
+        <template x-for="checkpoint in $store.agentHarness.pendingCheckpoints" :key="checkpoint.id">
+          <div class="ahc-row">
+            <span class="ahc-dot"></span>
+            <div>
+              <div class="ahc-row-title" x-text="checkpoint.reason"></div>
+              <div class="ahc-row-copy" x-text="checkpoint.proposed_action"></div>
+            </div>
+            <span class="ahc-row-status" x-text="checkpoint.risk_level"></span>
+            <div class="ahc-decision">
+              <button
+                type="button"
+                class="ahc-button is-primary"
+                @click="$store.agentHarness.decideCheckpoint(checkpoint.id, 'approved')"
+              >Approve</button>
+              <button
+                type="button"
+                class="ahc-button"
+                @click="$store.agentHarness.decideCheckpoint(checkpoint.id, 'rejected')"
+              >Reject</button>
+            </div>
+          </div>
+        </template>
+      </div>
+    </section>
+
+    <section
+      class="ahc-card"
+      x-show="$store.agentHarness.totalGraphTasks"
+    >
+      <div class="ahc-card-head">
+        <h2 class="ahc-card-title">
+          <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
+          Ultra task graph
+        </h2>
+        <span
+          class="ahc-badge"
+          x-text="$store.agentHarness.completedGraphTasks + '/' + $store.agentHarness.totalGraphTasks"
+        ></span>
+      </div>
+      <div class="ahc-list">
+        <template
+          x-for="task in ($store.agentHarness.currentRun?.task_graph?.sub_tasks || [])"
+          :key="task.id"
+        >
+          <div class="ahc-row">
+            <span class="ahc-dot" :class="'status-' + task.status"></span>
+            <div>
+              <div class="ahc-row-title" x-text="task.title"></div>
+              <div
+                class="ahc-row-copy"
+                x-text="task.result_summary || task.description || task.role"
+              ></div>
+            </div>
+            <span class="ahc-row-status" x-text="task.status"></span>
+          </div>
+        </template>
+      </div>
+    </section>
+
+    <section
+      class="ahc-card"
+      x-show="$store.agentHarness.latestVerification || ($store.agentHarness.currentRun?.failures || []).length"
+    >
+      <div class="ahc-card-head">
+        <h2 class="ahc-card-title">
+          <span class="material-symbols-outlined" aria-hidden="true">fact_check</span>
+          Verification
+        </h2>
+        <span
+          class="ahc-badge"
+          x-text="$store.agentHarness.latestVerification?.status || 'attention'"
+        ></span>
+      </div>
+      <template x-if="$store.agentHarness.latestVerification">
+        <div class="ahc-row">
+          <span
+            class="ahc-dot"
+            :class="'status-' + ($store.agentHarness.latestVerification.status === 'passed' ? 'completed' : 'failed')"
+          ></span>
+          <div>
+            <div class="ahc-row-title" x-text="$store.agentHarness.latestVerification.name"></div>
+            <div class="ahc-row-copy" x-text="$store.agentHarness.latestVerification.summary"></div>
+          </div>
+          <span class="ahc-row-status" x-text="$store.agentHarness.latestVerification.status"></span>
+        </div>
+      </template>
+      <div class="ahc-list" x-show="($store.agentHarness.currentRun?.failures || []).length">
+        <template x-for="failure in ($store.agentHarness.currentRun?.failures || [])" :key="failure.id">
+          <div class="ahc-row">
+            <span class="ahc-dot status-failed"></span>
+            <div>
+              <div class="ahc-row-title" x-text="failure.summary"></div>
+              <div class="ahc-row-copy" x-text="failure.location || failure.exception_type"></div>
+            </div>
+            <span class="ahc-row-status">failed</span>
+          </div>
+        </template>
+      </div>
+    </section>
+
+    <section
+      class="ahc-card"
+      x-show="$store.agentHarness.memoryQueue.length"
+    >
+      <div class="ahc-card-head">
+        <h2 class="ahc-card-title">
+          <span class="material-symbols-outlined" aria-hidden="true">psychology_alt</span>
+          Memory proposals
+        </h2>
+        <span class="ahc-badge" x-text="$store.agentHarness.memoryQueue.length"></span>
+      </div>
+      <div class="ahc-list">
+        <template x-for="candidate in $store.agentHarness.memoryQueue" :key="candidate.id">
+          <div class="ahc-row">
+            <span class="ahc-dot"></span>
+            <div>
+              <div class="ahc-row-title" x-text="candidate.rule_text"></div>
+              <div class="ahc-row-copy" x-text="candidate.reason"></div>
+            </div>
+            <span class="ahc-row-status" x-text="candidate.scope"></span>
+            <div class="ahc-decision">
+              <button
+                type="button"
+                class="ahc-button is-primary"
+                @click="$store.agentHarness.acceptCandidate(candidate.id, candidate.scope)"
+              >Accept</button>
+              <button
+                type="button"
+                class="ahc-button"
+                @click="$store.agentHarness.rejectCandidate(candidate.id)"
+              >Reject</button>
+            </div>
+          </div>
+        </template>
+      </div>
+    </section>
+  </main>
+</div>

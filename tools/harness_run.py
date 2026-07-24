@@ -4,6 +4,20 @@ from helpers.tool import Response, Tool
 
 from usr.plugins.agent_harness.helpers import runtime
 
+VALID_PHASES = {
+    "idle",
+    "inspect",
+    "plan",
+    "implement",
+    "verify",
+    "repair",
+    "blocked",
+    "summarize",
+    "complete",
+}
+VALID_VERIFICATION_STATUSES = {"passed", "failed", "unknown"}
+VALID_TASK_STATUSES = {"active", "completed", "failed", "blocked"}
+
 
 def _response(message: str) -> Response:
     return Response(message=message, break_loop=False)
@@ -16,6 +30,13 @@ class HarnessRun(Tool):
         run = runtime.get_current_run(self.agent)
 
         if action == "start":
+            if run:
+                try:
+                    from usr.plugins.agent_harness.helpers.parallel import kill_all
+
+                    kill_all(run.run_id)
+                except ImportError:
+                    pass
             mode = str(
                 kwargs.get("mode", settings.get("default_deep_mode", runtime.DEFAULT_DEEP_MODE))
             ).strip().lower()
@@ -33,20 +54,49 @@ class HarnessRun(Tool):
         if not run:
             return _response("No active harness run is available.")
 
+        if run.status == "completed" and action != "status":
+            return _response(
+                "This harness run is already complete. Start a new run before changing it."
+            )
+
+        if run.status == "blocked" and action not in {"status", "failure"}:
+            pending = runtime.get_pending_checkpoint(run)
+            detail = f" Pending checkpoint: {pending.reason}" if pending else ""
+            return _response(
+                "This harness run is blocked and cannot advance until the user resolves it."
+                + detail
+            )
+
         if action == "phase":
             phase = str(kwargs.get("phase", "")).strip().lower()
-            if phase:
-                run.phase = phase  # type: ignore[assignment]
-                if run.status != "blocked":
-                    run.status = "active"
+            if phase not in VALID_PHASES:
+                return _response(
+                    "Invalid phase. Use one of: " + ", ".join(sorted(VALID_PHASES)) + "."
+                )
+            if (
+                run.mode == "ultra"
+                and phase in {"implement", "verify", "summarize", "complete"}
+                and not run.task_graph
+            ):
+                return _response(
+                    "Ultra mode requires a task graph before implementation. "
+                    'Move to phase="plan", then submit action="plan".'
+                )
+            run.phase = phase  # type: ignore[assignment]
+            run.status = "active"
             runtime.save_current_run(self.agent.context, run)
             return _response(f"Harness phase updated to {run.phase}.")
 
         if action == "plan":
+            if run.mode != "ultra":
+                return _response(
+                    "Task graphs are exclusive to Ultra mode. In this mode, outline "
+                    "the plan in your reasoning and move to phase=\"implement\"."
+                )
             from usr.plugins.agent_harness.helpers.planner import submit_plan
             sub_tasks = kwargs.get("sub_tasks", [])
-            if not isinstance(sub_tasks, list):
-                return _response("plan action requires a 'sub_tasks' list.")
+            if not isinstance(sub_tasks, list) or not sub_tasks:
+                return _response("plan action requires a non-empty 'sub_tasks' list.")
             try:
                 graph = submit_plan(run, sub_tasks)
             except ValueError as exc:
@@ -57,6 +107,11 @@ class HarnessRun(Tool):
             return _response(f"Plan accepted with {len(titles)} tasks: {', '.join(titles)}")
 
         if action == "dispatch":
+            if run.mode != "ultra":
+                return _response(
+                    "Background dispatch is exclusive to Ultra mode. Continue in the "
+                    "main agent or start a new Ultra run."
+                )
             from usr.plugins.agent_harness.helpers.orchestrator import dispatch_ready_tasks
             from usr.plugins.agent_harness.helpers.parallel import (
                 spawn_parallel,
@@ -68,8 +123,18 @@ class HarnessRun(Tool):
             dispatched = dispatch_ready_tasks(run, settings)
             if not dispatched:
                 if run.task_graph and run.task_graph.is_complete():
-                    run.phase = "verify"
+                    failed = [
+                        task
+                        for task in run.task_graph.sub_tasks
+                        if task.status == "failed"
+                    ]
+                    run.phase = "repair" if failed else "verify"
                     runtime.save_current_run(self.agent.context, run)
+                    if failed:
+                        return _response(
+                            f"{len(failed)} sub-task(s) need main-chat repair before "
+                            "verification. Complete them and use action=\"adopt\"."
+                        )
                     return _response("All sub-tasks complete. Moving to verification phase.")
                 in_flight = active_count(run.run_id)
                 if in_flight > 0:
@@ -112,6 +177,10 @@ class HarnessRun(Tool):
             )
 
         if action == "collect":
+            if run.mode != "ultra":
+                return _response(
+                    "Background collection is exclusive to Ultra mode."
+                )
             from usr.plugins.agent_harness.helpers.parallel import (
                 poll_status, collect_completed, active_count, reconcile_run_graph,
             )
@@ -132,9 +201,19 @@ class HarnessRun(Tool):
             runtime.save_current_run(self.agent.context, run)
 
             if run.task_graph and run.task_graph.is_complete():
-                run.phase = "verify"
+                failed = [
+                    task for task in run.task_graph.sub_tasks if task.status == "failed"
+                ]
+                run.phase = "repair" if failed else "verify"
                 runtime.save_current_run(self.agent.context, run)
                 completed_count = len(results)
+                if failed:
+                    failed_names = ", ".join(task.title for task in failed[:5])
+                    return _response(
+                        f"Collected {completed_count} result(s). "
+                        f"{len(failed)} sub-task(s) need main-chat repair: {failed_names}. "
+                        'Complete each one and use harness_run action="adopt" before verification.'
+                    )
                 return _response(
                     f"Collected {completed_count} result(s). All sub-tasks complete. "
                     f"Moving to verification phase."
@@ -169,13 +248,23 @@ class HarnessRun(Tool):
 
         if action == "task":
             title = str(kwargs.get("task_title", "")).strip() or "Harness task"
-            status = str(kwargs.get("task_status", "active")).strip() or "active"
+            status = (
+                str(kwargs.get("task_status", "active")).strip().lower() or "active"
+            )
+            if status not in VALID_TASK_STATUSES:
+                return _response(
+                    "Invalid task status. Use one of: "
+                    + ", ".join(sorted(VALID_TASK_STATUSES))
+                    + "."
+                )
             details = str(kwargs.get("task_details", "")).strip()
             runtime.upsert_task(run, title=title, status=status, details=details)
             runtime.save_current_run(self.agent.context, run)
             return _response(f"Tracked harness task: {title} ({status}).")
 
         if action == "adopt":
+            if run.mode != "ultra":
+                return _response("The adopt action is only used by Ultra task graphs.")
             from usr.plugins.agent_harness.helpers.planner import mark_sub_task_completed
 
             sub_task_id = str(kwargs.get("sub_task_id", "")).strip()
@@ -203,6 +292,10 @@ class HarnessRun(Tool):
         if action == "verification":
             name = str(kwargs.get("verification_name", "")).strip() or "Verification"
             status = str(kwargs.get("verification_status", "unknown")).strip().lower()
+            if status not in VALID_VERIFICATION_STATUSES:
+                return _response(
+                    "Invalid verification status. Use passed, failed, or unknown."
+                )
             summary = str(kwargs.get("verification_summary", "")).strip() or name
             runtime.record_verification(
                 run,
@@ -227,19 +320,14 @@ class HarnessRun(Tool):
             if run.workspace:
                 from usr.plugins.agent_harness.helpers.workspace import clean_workspace
                 clean_workspace(run.workspace)
-                return _response("Workspace cleaned. Outputs and run logs preserved.")
+                return _response("Scratch workspace cleaned. Uploads and outputs preserved.")
             return _response("No workspace to clean.")
 
         if action == "complete":
-            # Refuse to complete if task graph has unfinished work
-            if run.task_graph and not run.task_graph.is_complete():
-                pending = [t for t in run.task_graph.sub_tasks if t.status in ("pending", "dispatched")]
-                pending_names = ", ".join(t.title for t in pending[:5])
+            blocker = runtime.completion_blocker(run)
+            if blocker:
                 runtime.save_current_run(self.agent.context, run)
-                return _response(
-                    f"Cannot complete: {len(pending)} task(s) still unfinished: {pending_names}. "
-                    f'Use harness_run action="dispatch" and action="collect" to finish them first.'
-                )
+                return _response(f"Cannot complete: {blocker}")
             runtime.complete_run(run)
             runtime.save_current_run(self.agent.context, run)
             return _response(f"Harness run completed for: {run.objective}")

@@ -8,6 +8,22 @@ from usr.plugins.agent_harness.helpers.cost_tracker import record_usage, check_b
 from usr.plugins.agent_harness.helpers.guardrails import request_checkpoint
 
 
+def _budget_checkpoint_exists(run, budget: int) -> bool:
+    return any(
+        checkpoint.tool_name == "harness_budget"
+        and checkpoint.tool_args.get("run_id") == run.run_id
+        and checkpoint.tool_args.get("budget") == budget
+        for checkpoint in run.checkpoints
+    )
+
+
+def _configured_budget(settings: dict) -> int:
+    try:
+        return max(0, int(settings.get("token_budget", 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
 class HarnessCost(Extension):
     async def execute(self, response: str = "", **kwargs):
         if not self.agent:
@@ -27,15 +43,29 @@ class HarnessCost(Extension):
 
         if completion_tokens > 0:
             record_usage(run, prompt_tokens=0, completion_tokens=completion_tokens)
-            lifecycle.save_current_run(self.agent.context, run)
+            budget = _configured_budget(agent_settings)
+            if run.cost:
+                run.cost.budget_limit = budget
+                run.cost.budget_remaining = max(
+                    0,
+                    budget - run.cost.usage.total_tokens,
+                )
 
-            if check_budget(run, agent_settings):
+            if (
+                check_budget(run, agent_settings)
+                and not _budget_checkpoint_exists(run, budget)
+            ):
                 request_checkpoint(
                     run,
-                    reason="Token budget exhausted. Approve to continue or stop the run.",
-                    proposed_action="Continue execution beyond token budget",
-                    tool_name="harness_cost",
-                    tool_args={},
+                    reason=(
+                        f"Approximate output-token budget of {budget} was reached. "
+                        "Approve once to continue this run without another budget prompt."
+                    ),
+                    proposed_action=(
+                        f"Continue run {run.run_id} beyond its configured token budget"
+                    ),
+                    tool_name="harness_budget",
+                    tool_args={"run_id": run.run_id, "budget": budget},
                     risk_level="high",
                 )
-                lifecycle.save_current_run(self.agent.context, run)
+            lifecycle.save_current_run(self.agent.context, run)

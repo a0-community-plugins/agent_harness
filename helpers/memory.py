@@ -1,8 +1,7 @@
 from __future__ import annotations
-import inspect
-from typing import Any
-from agent import Agent, AgentContext
-from helpers import plugins
+
+from agent import AgentContext
+
 from usr.plugins.agent_harness.helpers.models import (
     MemoryCandidate, MemoryScope, RunRecord, PLUGIN_NAME, now_iso, new_id,
 )
@@ -43,28 +42,6 @@ def find_memory_candidate(run: RunRecord, candidate_id: str) -> MemoryCandidate:
     raise ValueError(f"Memory candidate '{candidate_id}' not found")
 
 
-async def maybe_mirror_rule_to_memory(
-    *,
-    agent: Agent | None,
-    candidate: MemoryCandidate,
-) -> None:
-    if not agent:
-        return
-    if "_memory" not in plugins.get_enabled_plugins(agent):
-        return
-    from plugins._memory.helpers.memory import Memory
-
-    memory = await Memory.get(agent)
-    await memory.insert_text(
-        text=f"Harness rule: {candidate.rule_text}\nReason: {candidate.reason}",
-        metadata={
-            "area": Memory.Area.MAIN.value,
-            "source": PLUGIN_NAME,
-            "scope": candidate.scope,
-        },
-    )
-
-
 async def accept_memory_candidate(
     *,
     context: AgentContext,
@@ -73,6 +50,8 @@ async def accept_memory_candidate(
     project_name: str = "",
     agent_profile: str = "",
 ) -> MemoryCandidate:
+    if scope not in {"project", "agent", "global"}:
+        raise ValueError("Memory scope must be project, agent, or global")
     run = get_current_run(context)
     if not run:
         raise ValueError("No active harness run found")
@@ -108,12 +87,6 @@ async def accept_memory_candidate(
         agent_profile=agent_profile,
     )
     save_current_run(context, run)
-    mirror_result = maybe_mirror_rule_to_memory(
-        agent=context.get_agent(),
-        candidate=candidate,
-    )
-    if inspect.isawaitable(mirror_result):
-        await mirror_result
     return candidate
 
 

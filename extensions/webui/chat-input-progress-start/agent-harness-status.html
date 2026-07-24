@@ -6,12 +6,106 @@
 >
   <template x-if="ready && $store.agentHarness && $store.agentHarness.dashboard.show_status_ui !== false">
     <button
-      class="btn btn-secondary btn-sm"
+      class="agent-harness-toolbar-button"
+      :class="{
+        'is-running': !!$store.agentHarness.currentRun,
+        'needs-attention': $store.agentHarness.hasAttention
+      }"
       type="button"
-      @click="openModal('/plugins/agent_harness/webui/main.html')"
-      x-text="$store.agentHarness.statusButtonLabel()"
+      @click="$store.agentHarness.openObservability()"
+      :title="$store.agentHarness.currentRun
+        ? 'Open Agent Harness observability: ' + $store.agentHarness.statusButtonLabel()
+        : 'Open Agent Harness observability'"
+      aria-label="Open Agent Harness observability"
     >
-      Harness
+      <span class="material-symbols-outlined" aria-hidden="true">conversion_path</span>
+      <span class="agent-harness-toolbar-label">Harness</span>
+      <span
+        class="agent-harness-toolbar-state"
+        x-show="$store.agentHarness.currentRun"
+        x-text="$store.agentHarness.statusButtonLabel()"
+      ></span>
     </button>
   </template>
 </div>
+
+<style>
+  .agent-harness-status-chip {
+    display: inline-flex;
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .agent-harness-toolbar-button {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.38rem;
+    min-width: 0;
+    min-height: 1.9rem;
+    padding: 0.24rem 0.52rem;
+    border: 1px solid color-mix(in srgb, var(--color-border) 76%, transparent);
+    border-radius: 0.45rem;
+    background: color-mix(in srgb, var(--color-panel) 86%, transparent);
+    color: color-mix(in srgb, var(--color-text) 86%, transparent);
+    font: inherit;
+    font-size: 0.74rem;
+    font-weight: 650;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: none;
+    transition:
+      background-color 150ms ease,
+      border-color 150ms ease,
+      color 150ms ease;
+  }
+
+  .agent-harness-toolbar-button:hover {
+    background: var(--color-background-hover);
+    border-color: color-mix(in srgb, var(--color-highlight) 45%, var(--color-border));
+    color: var(--color-text);
+  }
+
+  .agent-harness-toolbar-button:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-highlight) 62%, transparent);
+    outline-offset: 2px;
+  }
+
+  .agent-harness-toolbar-button.is-running {
+    border-color: color-mix(in srgb, var(--color-highlight) 45%, var(--color-border));
+  }
+
+  .agent-harness-toolbar-button.needs-attention {
+    border-color: color-mix(in srgb, var(--color-warning-text) 65%, var(--color-border));
+  }
+
+  .agent-harness-toolbar-button > .material-symbols-outlined {
+    flex: 0 0 auto;
+    font-size: 1rem;
+    color: color-mix(in srgb, var(--color-highlight) 72%, var(--color-text));
+  }
+
+  .agent-harness-toolbar-label {
+    white-space: nowrap;
+  }
+
+  .agent-harness-toolbar-state {
+    max-width: 10rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 0.16rem 0.38rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--color-highlight) 13%, transparent);
+    color: var(--color-text-muted);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.035em;
+  }
+
+  @media (max-width: 52rem) {
+    .agent-harness-toolbar-state {
+      display: none !important;
+    }
+  }
+</style>

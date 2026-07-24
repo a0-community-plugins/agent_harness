@@ -1,10 +1,15 @@
+<script type="module">
+  import { store } from "/plugins/agent_harness/webui/harness-store.js";
+</script>
+
 <div x-data>
   <button
     x-move-after=".config-button#dashboard"
     class="config-button"
     id="agent-harness"
-    @click="openModal('/plugins/agent_harness/webui/main.html')"
-    title="Agent Harness"
+    @click="$store.agentHarness.openObservability()"
+    title="Agent Harness observability"
+    aria-label="Agent Harness observability"
   >
     <span class="material-symbols-outlined">conversion_path</span>
   </button>

@@ -1,4 +1,4 @@
-config_version: 3
+config_version: 4
 ambient_assist_enabled: true
 default_deep_mode: pro
 memory_curation_enabled: true
@@ -6,6 +6,7 @@ show_status_ui: true
 max_auto_edit_files: 8
 dependency_install_requires_checkpoint: true
 destructive_actions_require_checkpoint: true
+git_mutations_require_checkpoint: true
 protected_paths:
   - agent.py
   - initialize.py
@@ -24,8 +25,6 @@ mode_policies:
   ultra:
     subagent_limit: 3
     repair_limit: 3
-context_pressure_threshold: 0.7
-context_model_window: 128000
 workspace_enabled: true
 token_budget: 0
 cost_tracking_enabled: true

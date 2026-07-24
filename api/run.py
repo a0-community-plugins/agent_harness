@@ -12,6 +12,14 @@ class Run(ApiHandler):
         context = self.use_context(context_id, create_if_not_exists=action == "start")
 
         if action == "start":
+            existing = runtime.get_current_run(context)
+            if existing:
+                try:
+                    from usr.plugins.agent_harness.helpers.parallel import kill_all
+
+                    kill_all(existing.run_id)
+                except ImportError:
+                    pass
             settings = runtime.load_context_settings(context)
             run = runtime.create_run_record(
                 context_id=context.id,

@@ -10,7 +10,7 @@ const STATE_ENDPOINT = "/plugins/agent_harness/state";
 const RUN_ENDPOINT = "/plugins/agent_harness/run";
 const MEMORY_QUEUE_ENDPOINT = "/plugins/agent_harness/memory_queue";
 const TITLE = "Agent Harness";
-const POLL_MS = 5000;
+const POLL_MS = 3000;
 
 function currentContextId() {
   return globalThis.getContext?.() || "";
@@ -33,6 +33,9 @@ export const store = createStore("agentHarness", {
   _loaded: false,
   _timer: null,
   _inflight: null,
+  _inflightContext: "",
+  _contextId: "",
+  _requestSequence: 0,
 
   isLoading: false,
   isActing: false,
@@ -62,8 +65,53 @@ export const store = createStore("agentHarness", {
   },
 
   statusButtonLabel() {
-    if (!this.currentRun) return "Harness";
+    if (!this.currentRun) return "";
     return `${String(this.currentRun.mode || "").toUpperCase()} · ${this.phaseLabel(this.currentRun.phase)}`;
+  },
+
+  get completedGraphTasks() {
+    return (this.currentRun?.task_graph?.sub_tasks || []).filter(
+      (task) => task.status === "completed",
+    ).length;
+  },
+
+  get totalGraphTasks() {
+    return (this.currentRun?.task_graph?.sub_tasks || []).length;
+  },
+
+  get hasAttention() {
+    return Boolean(
+      this.error
+      || this.pendingCheckpoints.length
+      || this.currentRun?.status === "blocked"
+      || (this.currentRun?.failures || []).length,
+    );
+  },
+
+  _resetContextState(contextId = "") {
+    this._contextId = contextId;
+    this.dashboard = dashboardDefaults();
+    this.currentRun = null;
+    this.pendingCheckpoints = [];
+    this.memoryQueue = [];
+    this.recentRules = [];
+    this.latestVerification = null;
+    this.error = "";
+    this.isLoading = false;
+    this._loaded = false;
+  },
+
+  async openObservability() {
+    const canvas = globalThis.Alpine?.store("rightCanvas");
+    if (canvas?.open) {
+      const opened = await canvas.open("agent-harness");
+      if (opened) return true;
+    }
+    if (typeof globalThis.openModal === "function") {
+      globalThis.openModal("/plugins/agent_harness/webui/main.html");
+      return true;
+    }
+    return false;
   },
 
   async onMount() {
@@ -90,22 +138,33 @@ export const store = createStore("agentHarness", {
   async loadState({ silent = false } = {}) {
     const contextId = currentContextId();
     if (!contextId) {
-      this.currentRun = null;
-      this.pendingCheckpoints = [];
-      this.memoryQueue = [];
-      this.latestVerification = null;
+      if (this._contextId) this._resetContextState("");
       return null;
     }
 
-    if (this._inflight) {
+    if (contextId !== this._contextId) {
+      this._requestSequence += 1;
+      this._resetContextState(contextId);
+    }
+
+    if (this._inflight && this._inflightContext === contextId) {
       return await this._inflight;
     }
 
-    const request = (async () => {
+    const requestSequence = ++this._requestSequence;
+    let request;
+    request = (async () => {
       if (!silent) this.isLoading = true;
       this.error = "";
       try {
         const response = await callJsonApi(STATE_ENDPOINT, { context_id: contextId });
+        if (
+          currentContextId() !== contextId
+          || this._contextId !== contextId
+          || this._requestSequence !== requestSequence
+        ) {
+          return null;
+        }
         this.dashboard = { ...dashboardDefaults(), ...(response?.dashboard || {}) };
         this.currentRun = response?.run || null;
         this.pendingCheckpoints = Array.isArray(response?.pending_checkpoints)
@@ -119,18 +178,31 @@ export const store = createStore("agentHarness", {
         this._loaded = true;
         return response;
       } catch (error) {
+        if (
+          currentContextId() !== contextId
+          || this._contextId !== contextId
+          || this._requestSequence !== requestSequence
+        ) {
+          return null;
+        }
         this.error = errorMessage(error);
         if (!silent) {
           void toastFrontendError(`Failed to load harness state: ${this.error}`, TITLE);
         }
         return null;
       } finally {
-        if (!silent) this.isLoading = false;
-        this._inflight = null;
+        if (this._requestSequence === requestSequence && !silent) {
+          this.isLoading = false;
+        }
+        if (this._inflight === request) {
+          this._inflight = null;
+          this._inflightContext = "";
+        }
       }
     })();
 
     this._inflight = request;
+    this._inflightContext = contextId;
     return await request;
   },
 
