@@ -74,21 +74,23 @@ Git update fails before the new hook code is loaded.
 
 For most work:
 
-1. Start a `pro` run with a concrete objective.
-2. Inspect the relevant repository and constraints.
-3. Move through plan and implementation in the main agent.
-4. Run a concrete verification command.
-5. Record the verification result and complete the run.
+1. Enter a concrete objective in the Harness canvas and choose `Start Pro`.
+2. Send the next chat message to begin the guided workflow.
+3. Inspect the relevant repository and constraints.
+4. Move through plan and implementation in the main agent.
+5. Run a concrete verification command.
+6. Record the verification result and complete the run.
 
 For safely decomposable work:
 
-1. Start an `ultra` run.
-2. Submit a task graph with explicit dependencies.
-3. Dispatch only tasks that can edit without overlap.
-4. Collect worker results until the graph is complete.
-5. Repair or manually adopt any failed task in the main chat.
-6. Run and record a passing integration verification.
-7. Complete the run.
+1. Enter a concrete objective in the Harness canvas and choose `Start Ultra`.
+2. Send the next chat message to begin the guided workflow.
+3. Submit a task graph with explicit dependencies.
+4. Dispatch only tasks that can edit without overlap.
+5. Collect worker results until the graph is complete.
+6. Repair or manually adopt any failed task in the main chat.
+7. Run and record a passing integration verification.
+8. Complete the run.
 
 Completion fails closed when the latest verification is not passing. Ultra also
 requires every task in its graph to be completed successfully.
@@ -214,6 +216,7 @@ dashboard.
 
 The responsive canvas shows:
 
+- an inline objective field and explicit Pro or Ultra start controls
 - current objective, mode, phase, state, and risk
 - Ultra task-graph progress and worker results
 - pending approval checkpoints with approve and reject actions

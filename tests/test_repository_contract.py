@@ -20,7 +20,7 @@ class RepositoryContractTests(unittest.TestCase):
         ):
             self.assertTrue((PLUGIN_ROOT / filename).is_file(), filename)
         manifest = (PLUGIN_ROOT / "plugin.yaml").read_text(encoding="utf-8")
-        self.assertIn("version: 2.0.0", manifest)
+        self.assertIn("version: 2.0.1", manifest)
 
     def test_runtime_config_is_not_tracked_as_distribution_content(self):
         self.assertFalse((PLUGIN_ROOT / "config.json").exists())
@@ -96,6 +96,25 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("_inflightContext", source)
         self.assertIn("currentContextId() !== contextId", source)
         self.assertIn('canvas.open("agent-harness")', source)
+
+    def test_start_controls_use_inline_objectives_without_native_dialogs(self):
+        store = (PLUGIN_ROOT / "webui" / "harness-store.js").read_text(
+            encoding="utf-8"
+        )
+        canvas = (PLUGIN_ROOT / "webui" / "canvas.html").read_text(
+            encoding="utf-8"
+        )
+        dashboard = (PLUGIN_ROOT / "webui" / "dashboard.html").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertNotIn("window.prompt", store)
+        self.assertNotIn("window.confirm", store)
+        self.assertIn("startObjective", store)
+        self.assertIn('x-model="$store.agentHarness.startObjective"', canvas)
+        self.assertIn('x-model="$store.agentHarness.startObjective"', dashboard)
+        self.assertIn("Your next chat message", canvas)
+        self.assertIn("Your next chat message", dashboard)
 
     def test_obsolete_manual_setup_scripts_are_removed(self):
         self.assertFalse((PLUGIN_ROOT / "Install.md").exists())

@@ -1,7 +1,7 @@
 name: agent_harness
 title: Agent Harness
 description: Coding workflows, action-bound safety checkpoints, and Ultra-only parallel task execution for Agent Zero.
-version: 2.0.0
+version: 2.0.1
 settings_sections:
   - agent
   - developer
