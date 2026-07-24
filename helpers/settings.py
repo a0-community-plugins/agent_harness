@@ -12,7 +12,9 @@ from usr.plugins.agent_harness.helpers.models import (
     normalize_harness_mode,
 )
 
-CURRENT_CONFIG_VERSION = 3
+CURRENT_CONFIG_VERSION = 4
+MAX_PARALLEL_WORKERS = 4
+MAX_REPAIR_LIMIT = 10
 
 
 def load_default_settings() -> dict[str, Any]:
@@ -27,6 +29,7 @@ def load_default_settings() -> dict[str, Any]:
         "max_auto_edit_files": 8,
         "dependency_install_requires_checkpoint": True,
         "destructive_actions_require_checkpoint": True,
+        "git_mutations_require_checkpoint": True,
         "protected_paths": ["agent.py", "initialize.py", "usr/plugins/"],
         "accepted_rules": [],
         "mode_policies": {
@@ -35,6 +38,9 @@ def load_default_settings() -> dict[str, Any]:
             "pro": {"subagent_limit": 0, "repair_limit": 1},
             "ultra": {"subagent_limit": 3, "repair_limit": 3},
         },
+        "workspace_enabled": True,
+        "token_budget": 0,
+        "cost_tracking_enabled": True,
     }
 
 
@@ -175,10 +181,38 @@ def get_mode_policy(
         if isinstance(policies, dict)
         else {}
     )
+    normalized_mode = normalize_harness_mode(mode)
+    subagent_limit = _bounded_int(
+        policy.get("subagent_limit", 0),
+        default=1 if normalized_mode == "ultra" else 0,
+        minimum=1 if normalized_mode == "ultra" else 0,
+        maximum=MAX_PARALLEL_WORKERS,
+    )
+    if normalized_mode != "ultra":
+        subagent_limit = 0
     return {
-        "subagent_limit": int(policy.get("subagent_limit", 0)),
-        "repair_limit": int(policy.get("repair_limit", 0)),
+        "subagent_limit": subagent_limit,
+        "repair_limit": _bounded_int(
+            policy.get("repair_limit", 0),
+            default=0,
+            minimum=0,
+            maximum=MAX_REPAIR_LIMIT,
+        ),
     }
+
+
+def _bounded_int(
+    value: Any,
+    *,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return min(maximum, max(minimum, parsed))
 
 
 def get_default_mode(settings: dict[str, Any]) -> HarnessMode:
@@ -210,7 +244,12 @@ def persist_scope_settings(
 
 
 def check_config_version(settings: dict[str, Any]) -> bool:
-    return int(settings.get("config_version", 0)) >= CURRENT_CONFIG_VERSION
+    return _bounded_int(
+        settings.get("config_version", 0),
+        default=0,
+        minimum=0,
+        maximum=10_000,
+    ) >= CURRENT_CONFIG_VERSION
 
 
 def auto_upgrade_config(settings: dict[str, Any], settings_path: str = "") -> dict[str, Any]:

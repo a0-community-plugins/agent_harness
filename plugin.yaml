@@ -1,7 +1,7 @@
 name: agent_harness
 title: Agent Harness
-description: Deep-task harness controls, review checkpoints, and runtime status for Agent Zero.
-version: 1.0.0
+description: Coding workflows, action-bound safety checkpoints, and Ultra-only parallel task execution for Agent Zero.
+version: 2.0.0
 settings_sections:
   - agent
   - developer

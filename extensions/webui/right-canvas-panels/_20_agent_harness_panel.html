@@ -1,0 +1,11 @@
+<div
+  class="right-canvas-surface-panel agent-harness-canvas-surface"
+  data-surface-id="agent-harness"
+  :class="{
+    'is-active': $store.rightCanvas?.isSurfaceVisible('agent-harness'),
+    'is-mounted': $store.rightCanvas?.isSurfaceRendered('agent-harness')
+  }"
+  :aria-hidden="(!$store.rightCanvas?.isSurfaceVisible('agent-harness')).toString()"
+>
+  <x-component path="/plugins/agent_harness/webui/canvas.html"></x-component>
+</div>

@@ -3,12 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from agent import Agent, AgentContext
-from helpers import persist_chat, plugins, projects, skills as host_skills
+from helpers import persist_chat, plugins, skills as host_skills
 
 from usr.plugins.agent_harness.helpers import lifecycle
 from usr.plugins.agent_harness.helpers.workspace import (
     cleanup_thread_data,
-    ensure_gitignore,
     ensure_workspace,
     list_artifacts,
     list_uploads,
@@ -20,12 +19,8 @@ def ensure_context_workspace(context: AgentContext):
     if run and run.workspace and run.workspace.thread_root and run.workspace.uploads:
         return run.workspace
 
-    project_name = projects.get_context_project_name(context) or ""
-    project_dir = projects.get_project_folder(project_name) if project_name else ""
-    base_dir = project_dir or persist_chat.get_chat_folder_path(context.id)
+    base_dir = persist_chat.get_chat_folder_path(context.id)
     paths = ensure_workspace(base_dir, context_id=context.id)
-    if project_dir:
-        ensure_gitignore(project_dir)
 
     if run:
         run.workspace = paths
@@ -43,7 +38,6 @@ def summarize_thread_paths(paths) -> dict[str, Any]:
         "workspace": paths.workspace,
         "uploads": paths.uploads,
         "outputs": paths.outputs,
-        "runs": paths.runs,
         "upload_count": len(uploads),
         "artifact_count": len(artifacts),
     }

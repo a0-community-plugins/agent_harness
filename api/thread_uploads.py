@@ -4,6 +4,12 @@ from helpers.api import ApiHandler, Request, Response
 from helpers.security import safe_filename
 
 from usr.plugins.agent_harness.helpers.deerflow_client import DeerFlowClient
+from usr.plugins.agent_harness.helpers.upload_limits import (
+    MAX_UPLOAD_BATCH_BYTES,
+    UploadTooLargeError,
+    format_byte_limit,
+    read_upload_bytes,
+)
 
 
 class ThreadUploads(ApiHandler):
@@ -26,11 +32,17 @@ class ThreadUploads(ApiHandler):
         context = self.use_context(str(context_id).strip(), create_if_not_exists=False)
         client = DeerFlowClient(context)
 
+        if action in {"delete", "upload"} and request.method != "POST":
+            return Response("Upload mutations require POST.", status=405)
+
         if action == "delete":
             relative_path = str(
                 request.form.get("path") or input.get("path") or input.get("filename", "")
             ).strip()
-            deleted = client.delete_thread_upload(relative_path)
+            try:
+                deleted = client.delete_thread_upload(relative_path)
+            except ValueError as exc:
+                return Response(str(exc), status=400)
             return {
                 "success": deleted,
                 "context_id": context.id,
@@ -51,6 +63,8 @@ class ThreadUploads(ApiHandler):
 
             saved: list[str] = []
             skipped: list[str] = []
+            rejected: list[dict[str, str]] = []
+            batch_size = 0
             for file in files_to_save:
                 if not file or not file.filename:
                     continue
@@ -58,16 +72,41 @@ class ThreadUploads(ApiHandler):
                 if not filename:
                     skipped.append(file.filename)
                     continue
-                client.save_thread_upload(filename, file.read())
+                try:
+                    content = read_upload_bytes(file)
+                except UploadTooLargeError as exc:
+                    rejected.append({"name": file.filename, "reason": str(exc)})
+                    continue
+                if batch_size + len(content) > MAX_UPLOAD_BATCH_BYTES:
+                    rejected.append(
+                        {
+                            "name": file.filename,
+                            "reason": (
+                                "Upload batch exceeds the "
+                                f"{format_byte_limit(MAX_UPLOAD_BATCH_BYTES)} limit."
+                            ),
+                        }
+                    )
+                    continue
+                try:
+                    client.save_thread_upload(filename, content)
+                except ValueError as exc:
+                    rejected.append({"name": file.filename, "reason": str(exc)})
+                    continue
+                batch_size += len(content)
                 saved.append(filename)
 
             return {
-                "success": True,
+                "success": bool(saved),
                 "context_id": context.id,
                 "saved": saved,
                 "skipped": skipped,
+                "rejected": rejected,
                 "uploads": client.list_thread_uploads(),
             }
+
+        if action != "list":
+            return Response(f"Unknown upload action: {action}", status=400)
 
         return {
             "success": True,

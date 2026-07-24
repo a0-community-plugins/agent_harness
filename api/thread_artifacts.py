@@ -22,7 +22,16 @@ class ThreadArtifacts(ApiHandler):
 
         if request.method == "GET":
             relative_path = str(request.args.get("path", "")).strip()
-            artifact = client.resolve_thread_artifact(relative_path)
+            if not relative_path:
+                return {
+                    "success": True,
+                    "context_id": context.id,
+                    "artifacts": client.list_thread_artifacts(),
+                }
+            try:
+                artifact = client.resolve_thread_artifact(relative_path)
+            except ValueError as exc:
+                return Response(str(exc), status=400)
             if not artifact.exists() or not artifact.is_file():
                 return Response("Artifact not found", status=404)
             download = str(request.args.get("download", "1")).strip().lower() not in {

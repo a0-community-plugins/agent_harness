@@ -44,13 +44,12 @@ def render_system_prompt(
     if run.mode == "ultra":
         prompt.extend([
             "ULTRA WORKFLOW (plan + subagents):",
-            "- For simple single-file tasks: implement directly, verify, complete.",
-            "- For multi-file tasks (2+ files to create or modify): you MUST plan first.",
-            '  Use harness_run action="plan" to decompose into sub-tasks BEFORE writing any code.',
+            "- You MUST create a task graph before implementation, even for a single planned sub-task.",
+            '  Use harness_run action="plan" to decompose the work BEFORE writing code.',
             '  Then use action="dispatch" to spawn parallel sub-agents and action="collect" to harvest results.',
             f"- Up to {policy['subagent_limit']} parallel sub-agents available. USE THEM for independent work.",
             f"- {repair_limit} repair loops max before surfacing the blocker.",
-            "- Use harness_checkpoint before: pip/npm install, git push, rm -rf, or editing protected files.",
+            "- Use harness_checkpoint before dependency installs, repository-changing Git commands, destructive actions, or protected-file edits.",
         ])
     elif run.mode == "pro":
         prompt.extend([
@@ -64,7 +63,7 @@ def render_system_prompt(
             "- Phase 4 VERIFY: Run tests. Record results with harness_run action=\"verification\".",
             "- Phase 5 COMPLETE: Mark done with harness_run action=\"complete\".",
             f"- {repair_limit} repair loops max before surfacing the blocker.",
-            "- MANDATORY checkpoints before: dependency installs, destructive commands, protected file edits, git push.",
+            "- MANDATORY checkpoints before dependency installs, repository-changing Git commands, destructive actions, or protected-file edits.",
             "- Use harness_checkpoint proactively. Do NOT skip checkpoints.",
         ])
     elif run.mode == "standard":
@@ -104,25 +103,39 @@ def render_system_prompt(
     if rules_text:
         prompt.extend(["Accepted rules:", rules_text])
 
-    # Phase-aware task graph sections
+    # Phase-aware workflow sections
     if run.phase in ("inspect", "plan") and not run.task_graph:
         if run.phase == "inspect":
-            prompt.extend([
-                "INSPECT PHASE — READ BEFORE ACTING",
-                "Examine the repo structure, read relevant files, and understand the codebase.",
-                'When ready, use harness_run action="phase" phase="plan" to move to planning.',
-                "Do NOT start writing code yet.",
-            ])
+            next_phase = "plan" if run.mode == "ultra" else "implement"
+            prompt.extend(
+                [
+                    "INSPECT PHASE — READ BEFORE ACTING",
+                    "Examine the repo structure, read relevant files, and understand the codebase.",
+                    f'When ready, use harness_run action="phase" phase="{next_phase}".',
+                    "Do NOT start writing code yet.",
+                ]
+            )
+        elif run.mode == "ultra":
+            prompt.extend(
+                [
+                    "PLANNING PHASE — DECOMPOSE INDEPENDENT WORK",
+                    "Decompose the objective into sub-tasks before writing code.",
+                    "Only parallelize tasks that can safely share the same workspace without overlapping edits.",
+                    "Available roles: research, code, verify, synthesize.",
+                    "Reference dependencies by zero-based index. Example: depends_on: [0] depends on the first task.",
+                    'Submit the plan with harness_run action="plan" sub_tasks=[...].',
+                    "Do NOT use code_execution_tool or text_editor until the plan is submitted.",
+                ]
+            )
         else:
-            prompt.extend([
-                "PLANNING PHASE — REQUIRED BEFORE IMPLEMENTING",
-                "You MUST decompose the objective into sub-tasks before writing any code.",
-                "Each sub-task should be independently executable by a parallel sub-agent.",
-                "Available roles: research (read docs/code), code (implement), verify (test), synthesize (combine).",
-                "Reference dependencies by index. Example: depends_on: [0] means depends on the first task.",
-                'Submit your plan: harness_run action="plan" sub_tasks=[...]',
-                "Do NOT use code_execution_tool or text_editor until the plan is submitted.",
-            ])
+            prompt.extend(
+                [
+                    "PLANNING PHASE — SINGLE-AGENT",
+                    "Outline the intended changes and verification in your reasoning.",
+                    'When ready to edit, use harness_run action="phase" phase="implement".',
+                    "Do not create a task graph or dispatch background workers in this mode.",
+                ]
+            )
 
     if run.task_graph:
         completed = [t for t in run.task_graph.sub_tasks if t.status == "completed"]
@@ -132,7 +145,8 @@ def render_system_prompt(
             t for t in run.task_graph.sub_tasks
             if t.status == "pending" and t not in ready
         ]
-        has_remaining = bool(dispatched or ready or blocked)
+        failed = [t for t in run.task_graph.sub_tasks if t.status == "failed"]
+        has_remaining = bool(dispatched or ready or blocked or failed)
 
         graph_lines = [
             "TASK GRAPH STATUS",
@@ -151,6 +165,8 @@ def render_system_prompt(
             graph_lines.append('>>> NEXT ACTION: harness_run action="dispatch" to spawn parallel sub-agents <<<')
         if blocked:
             graph_lines.append("Blocked (waiting on dependencies): " + ", ".join(t.title for t in blocked))
+        if failed:
+            graph_lines.append("Failed: " + ", ".join(t.title for t in failed))
 
         if has_remaining:
             graph_lines.extend([
@@ -160,16 +176,18 @@ def render_system_prompt(
                 "Do NOT use harness_run action=\"complete\" until all tasks are done.",
                 "You MUST continue the dispatch → collect cycle until all tasks are completed.",
             ])
-            if any(t.status == "failed" for t in run.task_graph.sub_tasks):
+            if failed:
                 graph_lines.extend([
                     "",
                     "MANUAL TAKEOVER EXCEPTION:",
-                    "If sub-agent execution is unavailable or repeatedly failing, you may complete the remaining work yourself.",
+                    "A worker failed or stopped at a safety boundary. Complete that work in the main chat.",
                     "After manual completion, reconcile the graph with harness_run action=\"adopt\" for each finished sub-task.",
                 ])
-        elif completed and not has_remaining:
+        elif run.task_graph.is_successful():
             graph_lines.append("All sub-tasks complete.")
-            graph_lines.append('>>> NEXT ACTION: Run tests to verify, then harness_run action="complete" <<<')
+            graph_lines.append(
+                '>>> NEXT ACTION: Run tests, record a passing verification, then use harness_run action="complete" <<<'
+            )
         prompt.extend(graph_lines)
 
     return "\n\n".join(prompt)
