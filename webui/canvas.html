@@ -321,6 +321,11 @@
     border-color: color-mix(in srgb, var(--color-error-text) 42%, var(--ahc-border));
   }
 
+  .ahc-button:disabled {
+    opacity: 0.52;
+    cursor: wait;
+  }
+
   .ahc-list {
     display: flex;
     flex-direction: column;
@@ -393,6 +398,66 @@
     line-height: 1.5;
   }
 
+  .ahc-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.32rem;
+    width: 100%;
+  }
+
+  .ahc-field-label {
+    color: var(--ahc-muted);
+    font-size: 0.61rem;
+    font-weight: 720;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .ahc-objective-input {
+    appearance: none;
+    width: 100%;
+    min-height: 5rem;
+    resize: vertical;
+    padding: 0.58rem 0.62rem;
+    border: 1px solid var(--ahc-border);
+    border-radius: 0.4rem;
+    background: color-mix(in srgb, var(--color-background) 72%, transparent);
+    color: var(--color-text);
+    font: inherit;
+    font-size: 0.74rem;
+    line-height: 1.45;
+  }
+
+  .ahc-objective-input::placeholder {
+    color: var(--ahc-muted);
+    opacity: 0.72;
+  }
+
+  .ahc-objective-input:focus {
+    border-color: color-mix(in srgb, var(--color-highlight) 62%, var(--ahc-border));
+    outline: 2px solid color-mix(in srgb, var(--color-highlight) 15%, transparent);
+    outline-offset: 1px;
+  }
+
+  .ahc-start-error {
+    color: var(--color-error-text);
+    font-size: 0.66rem;
+    line-height: 1.4;
+  }
+
+  .ahc-start-hint,
+  .ahc-run-note {
+    color: var(--ahc-muted);
+    font-size: 0.66rem;
+    line-height: 1.45;
+  }
+
+  .ahc-run-note {
+    padding: 0.5rem 0.56rem;
+    border-left: 2px solid var(--color-highlight);
+    background: color-mix(in srgb, var(--color-highlight) 7%, transparent);
+  }
+
   .ahc-decision {
     display: flex;
     gap: 0.32rem;
@@ -461,6 +526,10 @@
       <template x-if="$store.agentHarness.currentRun">
         <div class="ahc-list">
           <div class="ahc-objective" x-text="$store.agentHarness.currentRun.objective"></div>
+          <div class="ahc-run-note">
+            Harness guidance is active for this chat. Send your next chat message
+            to begin or continue work on this objective.
+          </div>
 
           <div class="ahc-metrics">
             <div class="ahc-metric">
@@ -506,13 +575,33 @@
             <button
               type="button"
               class="ahc-button"
+              :disabled="$store.agentHarness.isActing"
               @click="$store.agentHarness.refresh()"
             >Refresh</button>
-            <button
-              type="button"
-              class="ahc-button is-danger"
-              @click="$store.agentHarness.stopRun()"
-            >Stop run</button>
+            <template x-if="!$store.agentHarness.stopConfirmationPending">
+              <button
+                type="button"
+                class="ahc-button is-danger"
+                :disabled="$store.agentHarness.isActing"
+                @click="$store.agentHarness.requestStopRun()"
+              >Stop run</button>
+            </template>
+            <template x-if="$store.agentHarness.stopConfirmationPending">
+              <button
+                type="button"
+                class="ahc-button is-danger"
+                :disabled="$store.agentHarness.isActing"
+                @click="$store.agentHarness.stopRun()"
+              >Confirm stop</button>
+            </template>
+            <template x-if="$store.agentHarness.stopConfirmationPending">
+              <button
+                type="button"
+                class="ahc-button"
+                :disabled="$store.agentHarness.isActing"
+                @click="$store.agentHarness.cancelStopRun()"
+              >Keep running</button>
+            </template>
           </div>
         </div>
       </template>
@@ -524,15 +613,41 @@
             Pro keeps one coding agent inside a structured workflow. Ultra adds
             a mandatory task graph and one to four bounded workers.
           </div>
+          <label class="ahc-field" for="agent-harness-canvas-objective">
+            <span class="ahc-field-label">Objective</span>
+            <textarea
+              id="agent-harness-canvas-objective"
+              class="ahc-objective-input"
+              rows="3"
+              maxlength="500"
+              x-model="$store.agentHarness.startObjective"
+              @input="$store.agentHarness.startError = ''"
+              aria-describedby="agent-harness-canvas-objective-hint"
+              placeholder="Describe the coding or research task the harness should drive…"
+            ></textarea>
+          </label>
+          <div
+            class="ahc-start-error"
+            x-show="$store.agentHarness.startError"
+            x-text="$store.agentHarness.startError"
+            role="alert"
+          ></div>
+          <div id="agent-harness-canvas-objective-hint" class="ahc-start-hint">
+            Starting arms the harness for this chat. Your next chat message begins
+            the guided workflow.
+          </div>
           <div class="ahc-actions">
             <button
               type="button"
               class="ahc-button is-primary"
+              :disabled="$store.agentHarness.isActing"
               @click="$store.agentHarness.startRun('pro')"
+              x-text="$store.agentHarness.isActing ? 'Starting…' : 'Start Pro'"
             >Start Pro</button>
             <button
               type="button"
               class="ahc-button"
+              :disabled="$store.agentHarness.isActing"
               @click="$store.agentHarness.startRun('ultra')"
             >Start Ultra</button>
           </div>

@@ -23,16 +23,58 @@
               <span><strong>Pro</strong> structured single agent</span>
               <span><strong>Ultra</strong> task graph + 1-4 workers</span>
             </div>
+            <div class="agent-harness-launch" x-show="!$store.agentHarness.currentRun">
+              <label for="agent-harness-dashboard-objective">Objective</label>
+              <textarea
+                id="agent-harness-dashboard-objective"
+                rows="3"
+                maxlength="500"
+                x-model="$store.agentHarness.startObjective"
+                @input="$store.agentHarness.startError = ''"
+                aria-describedby="agent-harness-dashboard-objective-hint"
+                placeholder="Describe the coding or research task the harness should drive…"
+              ></textarea>
+              <div
+                class="agent-harness-start-error"
+                x-show="$store.agentHarness.startError"
+                x-text="$store.agentHarness.startError"
+                role="alert"
+              ></div>
+              <div id="agent-harness-dashboard-objective-hint" class="agent-harness-launch-hint">
+                Starting arms the harness for this chat. Your next chat message
+                begins the guided workflow.
+              </div>
+            </div>
           </div>
           <div class="agent-harness-actions">
             <button class="button" @click="$store.agentHarness.refresh()">Refresh</button>
             <button class="button confirm"
+                    :disabled="$store.agentHarness.isActing"
+                    x-show="!$store.agentHarness.currentRun"
                     title="Structured single-agent workflow"
                     @click="$store.agentHarness.startRun('pro')">Start Pro</button>
             <button class="button"
+                    :disabled="$store.agentHarness.isActing"
+                    x-show="!$store.agentHarness.currentRun"
                     title="Mandatory task graph with 1-4 background workers"
                     @click="$store.agentHarness.startRun('ultra')">Start Ultra</button>
-            <button class="button" x-show="$store.agentHarness.currentRun" @click="$store.agentHarness.stopRun()">Stop Run</button>
+            <button
+              class="button"
+              x-show="$store.agentHarness.currentRun && !$store.agentHarness.stopConfirmationPending"
+              @click="$store.agentHarness.requestStopRun()"
+            >Stop Run</button>
+            <button
+              class="button"
+              x-show="$store.agentHarness.currentRun && $store.agentHarness.stopConfirmationPending"
+              :disabled="$store.agentHarness.isActing"
+              @click="$store.agentHarness.stopRun()"
+            >Confirm Stop</button>
+            <button
+              class="button"
+              x-show="$store.agentHarness.currentRun && $store.agentHarness.stopConfirmationPending"
+              :disabled="$store.agentHarness.isActing"
+              @click="$store.agentHarness.cancelStopRun()"
+            >Keep Running</button>
           </div>
         </div>
 
@@ -51,6 +93,10 @@
             <template x-if="$store.agentHarness.currentRun">
               <div class="agent-harness-run-body">
                 <div class="agent-harness-run-objective" x-text="$store.agentHarness.currentRun.objective"></div>
+                <div class="agent-harness-run-note">
+                  Harness guidance is active for this chat. Send your next chat
+                  message to begin or continue this objective.
+                </div>
                 <div class="agent-harness-meta-row">
                   <span class="agent-harness-meta-pill agent-harness-pill-mode" x-text="$store.agentHarness.currentRun.mode"></span>
                   <span class="agent-harness-meta-pill"
@@ -284,11 +330,72 @@
       align-items: baseline;
     }
 
+    .agent-harness-launch {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      width: min(100%, 42rem);
+      margin-top: 0.9rem;
+    }
+
+    .agent-harness-launch label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      opacity: 0.72;
+      text-transform: uppercase;
+    }
+
+    .agent-harness-launch textarea {
+      appearance: none;
+      width: 100%;
+      min-height: 5rem;
+      resize: vertical;
+      padding: 0.65rem 0.7rem;
+      border: 1px solid color-mix(in srgb, var(--color-border) 78%, transparent);
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--color-background) 72%, transparent);
+      color: var(--color-text);
+      font: inherit;
+      font-size: 0.86rem;
+      line-height: 1.45;
+    }
+
+    .agent-harness-launch textarea:focus {
+      border-color: color-mix(in srgb, var(--color-highlight) 62%, var(--color-border));
+      outline: 2px solid color-mix(in srgb, var(--color-highlight) 15%, transparent);
+      outline-offset: 1px;
+    }
+
+    .agent-harness-start-error {
+      color: var(--color-error-text);
+      font-size: 0.78rem;
+      line-height: 1.4;
+    }
+
+    .agent-harness-launch-hint,
+    .agent-harness-run-note {
+      font-size: 0.76rem;
+      line-height: 1.45;
+      opacity: 0.7;
+    }
+
+    .agent-harness-run-note {
+      padding: 0.6rem 0.7rem;
+      border-left: 2px solid var(--color-highlight);
+      background: color-mix(in srgb, var(--color-highlight) 7%, transparent);
+    }
+
     .agent-harness-actions {
       display: flex;
       gap: 0.5rem;
       flex-wrap: wrap;
       justify-content: flex-end;
+    }
+
+    .agent-harness-actions .button:disabled {
+      opacity: 0.52;
+      cursor: wait;
     }
 
     .agent-harness-grid {

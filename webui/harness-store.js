@@ -40,6 +40,9 @@ export const store = createStore("agentHarness", {
   isLoading: false,
   isActing: false,
   error: "",
+  startObjective: "",
+  startError: "",
+  stopConfirmationPending: false,
 
   dashboard: dashboardDefaults(),
   currentRun: null,
@@ -97,6 +100,9 @@ export const store = createStore("agentHarness", {
     this.recentRules = [];
     this.latestVerification = null;
     this.error = "";
+    this.startObjective = "";
+    this.startError = "";
+    this.stopConfirmationPending = false;
     this.isLoading = false;
     this._loaded = false;
   },
@@ -234,26 +240,52 @@ export const store = createStore("agentHarness", {
     }
   },
 
-  async startRun(mode) {
-    const defaultObjective = this.currentRun?.objective || "Active coding task";
-    const objective = window.prompt("Harness objective", defaultObjective);
-    if (objective === null) return;
+  async startRun(mode, objective = this.startObjective) {
+    const selectedMode = String(
+      mode || this.dashboard.default_deep_mode || "pro",
+    ).toLowerCase();
+    const trimmedObjective = String(objective || "").trim();
+    if (!trimmedObjective) {
+      this.startError = "Describe what the harness should accomplish before starting.";
+      toastFrontendInfo(this.startError, TITLE);
+      return null;
+    }
 
-    const trimmedObjective = objective.trim() || defaultObjective;
-    await this._runAction(
+    this.startError = "";
+    const result = await this._runAction(
       RUN_ENDPOINT,
       {
         action: "start",
-        mode: mode || this.dashboard.default_deep_mode || "pro",
+        mode: selectedMode,
         objective: trimmedObjective,
       },
-      `Started ${String(mode || this.dashboard.default_deep_mode || "pro").toUpperCase()} mode.`,
+      `${selectedMode.toUpperCase()} is ready. Send your next chat message to begin.`,
     );
+    if (result?.success) {
+      this.startObjective = "";
+      this.stopConfirmationPending = false;
+    }
+    return result;
+  },
+
+  requestStopRun() {
+    this.stopConfirmationPending = true;
+  },
+
+  cancelStopRun() {
+    this.stopConfirmationPending = false;
   },
 
   async stopRun() {
-    if (!window.confirm("Stop the current harness run?")) return;
-    await this._runAction(RUN_ENDPOINT, { action: "stop" }, "Harness run stopped.");
+    const result = await this._runAction(
+      RUN_ENDPOINT,
+      { action: "stop" },
+      "Harness run stopped.",
+    );
+    if (result?.success) {
+      this.stopConfirmationPending = false;
+    }
+    return result;
   },
 
   async decideCheckpoint(checkpointId, decision) {
